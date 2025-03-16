@@ -48,46 +48,15 @@ Only entries that haven't been pushed yet will be synchronized.`,
 			os.Exit(1)
 		}
 
-		// Get all entries
-		entries, err := manager.GetLatestEntries(0)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting entries: %v\n", err)
-			os.Exit(1)
-		}
-
 		// Create Notion client
 		notionClient := til.NewNotionClient(config.NotionAPIKey, config.NotionDBID)
 
-		// Get entries from Notion
+		// Push entries to Notion
 		ctx := context.Background()
-		notionEntries, err := notionClient.GetEntries(ctx, 100)
+		pushed, err := manager.PushEntriesToNotion(ctx, notionClient)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting entries from Notion: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error pushing entries to Notion: %v\n", err)
 			os.Exit(1)
-		}
-
-		// Find entries that haven't been pushed yet
-		notionDates := make(map[string]bool)
-		for _, entry := range notionEntries {
-			dateStr := entry.Date.Format("2006-01-02")
-			notionDates[dateStr] = true
-		}
-
-		// Push entries
-		pushed := 0
-		for _, entry := range entries {
-			dateStr := entry.Date.Format("2006-01-02")
-			if !notionDates[dateStr] {
-				fmt.Printf("Pushing entry from %s...\n", dateStr)
-
-				// Push to Notion
-				if err := notionClient.PushEntry(ctx, entry); err != nil {
-					fmt.Fprintf(os.Stderr, "Error pushing entry to Notion: %v\n", err)
-					continue
-				}
-
-				pushed++
-			}
 		}
 
 		fmt.Printf("Successfully pushed %d entries to Notion\n", pushed)
