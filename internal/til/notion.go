@@ -26,7 +26,7 @@ func NewNotionClient(apiKey string, dbID string) *NotionClient {
 // PushEntry pushes a TIL entry to Notion
 func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry) error {
 	if nc.client == nil {
-		return errors.New("Notion client not initialized")
+		return errors.New("notion client not initialized")
 	}
 
 	// Create a new page with the TIL entry
@@ -78,7 +78,7 @@ func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry) error {
 // GetEntries retrieves TIL entries from Notion
 func (nc *NotionClient) GetEntries(ctx context.Context, limit int) ([]Entry, error) {
 	if nc.client == nil {
-		return nil, errors.New("Notion client not initialized")
+		return nil, errors.New("notion client not initialized")
 	}
 
 	// Query the database with a limit
