@@ -18,21 +18,19 @@ for adding entries and syncing them with Notion.`,
 	},
 }
 
-// Execute executes the root command
 func Execute() error {
 	return rootCmd.Execute()
 }
 
 func init() {
-	// Add subcommands here
 	rootCmd.AddCommand(versionCmd)
 }
 
-// Simple version command as our "hello world" feature
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version number of TIL",
 	Run: func(cmd *cobra.Command, args []string) {
+		// TODO(michaelfromyeg): implement true version here
 		fmt.Println("TIL v0.1.0")
 	},
 }

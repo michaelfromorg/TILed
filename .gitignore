@@ -1,6 +1,11 @@
 ### Custom
 
 tiled
+.env
+
+# within-repo testing
+.til
+data/
 
 ### Go.gitignore
 

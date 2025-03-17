@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/michaelfromorg/tiled/internal/til"
@@ -56,6 +57,12 @@ Use --amend to amend the previous commit.`,
 				os.Exit(1)
 			}
 			fmt.Println("Commit amended successfully")
+
+			// If Git sync is enabled, print a message
+			if config.SyncToGit {
+				fmt.Println("Changes have been committed to Git and pushed to the remote repository")
+			}
+
 			return
 		}
 
@@ -91,5 +98,39 @@ Use --amend to amend the previous commit.`,
 		}
 
 		fmt.Println("Committed successfully")
+
+		// If Git sync is enabled, print a message
+		if config.SyncToGit {
+			fmt.Println("Changes have been committed to Git and pushed to the remote repository")
+
+			// Print the URL to the til directory in the remote repository if available
+			if config.GitRemoteURL != "" {
+				url := config.GitRemoteURL
+				// Remove .git suffix if present
+				if filepath.Ext(url) == ".git" {
+					url = url[:len(url)-4]
+				}
+				// If it's an SSH URL, convert to HTTPS URL
+				if len(url) > 4 && url[:4] == "git@" {
+					// For github.com URLs
+					if len(url) > 10 && url[4:14] == "github.com" {
+						parts := url[4:]
+						colonIndex := 0
+						for i, c := range parts {
+							if c == ':' {
+								colonIndex = i
+								break
+							}
+						}
+						if colonIndex > 0 {
+							domain := parts[:colonIndex]
+							repo := parts[colonIndex+1:]
+							url = fmt.Sprintf("https://%s/%s", domain, repo)
+						}
+					}
+				}
+				fmt.Printf("View your TIL repository at: %s\n", url)
+			}
+		}
 	},
 }

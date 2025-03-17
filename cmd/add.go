@@ -36,6 +36,12 @@ The files will be staged for the next commit.`,
 		// Create manager
 		manager := til.NewManager(config)
 
+		// Check if the repository is initialized
+		if !manager.IsInitialized() {
+			fmt.Fprintln(os.Stderr, "TIL repository not initialized. Run 'til init' first.")
+			os.Exit(1)
+		}
+
 		// Add each file
 		for _, filePath := range args {
 			if err := manager.AddFile(filePath); err != nil {
@@ -43,6 +49,15 @@ The files will be staged for the next commit.`,
 				continue
 			}
 			fmt.Printf("Added file: %s\n", filePath)
+		}
+
+		// Show reminder about committing
+		fmt.Println("\nRemember to commit your changes with:")
+		fmt.Println("  til commit -m \"Your message here\"")
+
+		// If Git sync is enabled, remind about pushing
+		if config.SyncToGit {
+			fmt.Println("\nAfter committing, your changes will be automatically pushed to Git.")
 		}
 	},
 }

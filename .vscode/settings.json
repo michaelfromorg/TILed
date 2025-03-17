@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        ".env": "dotenv",
+        ".env.example": "dotenv"
+    },
+    "files.insertFinalNewline": true,
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit",
+        "source.fixAll": "explicit"
+    }
+}

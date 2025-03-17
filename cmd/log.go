@@ -72,5 +72,21 @@ By default, shows the last 10 entries. Use -n to specify the number of entries t
 			}
 			fmt.Printf("%d. %s: %s%s\n", i+1, dateStr, entry.Message, files)
 		}
+
+		// Print Git URL if Git sync is enabled
+		if config.SyncToGit && config.GitRemoteURL != "" {
+			fmt.Println("\nGit Repository:")
+			fmt.Println("--------------")
+			url := config.GitRemoteURL
+			url = strings.TrimSuffix(url, ".git") // Ensure no trailing .git
+			// Convert SSH URL to HTTPS URL if needed
+			if strings.HasPrefix(url, "git@") {
+				parts := strings.Split(url[4:], ":")
+				if len(parts) == 2 {
+					url = fmt.Sprintf("https://%s/%s", parts[0], parts[1])
+				}
+			}
+			fmt.Printf("Your TIL repository is available at: %s\n", url)
+		}
 	},
 }

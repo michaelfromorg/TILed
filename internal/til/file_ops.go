@@ -145,6 +145,40 @@ func (m *Manager) CommitEntry(message string) error {
 		}
 	}
 
+	// Update README.md if Git sync is enabled
+	if m.Config.SyncToGit {
+		if err := m.updateReadme(entry); err != nil {
+			fmt.Printf("Warning: Failed to update README.md: %v\n", err)
+			// Continue anyway
+		}
+	}
+
+	// Sync with Git if enabled
+	if m.Config.SyncToGit {
+		tilDir := filepath.Join(m.Config.DataDir, "til")
+		gitManager := NewGitManager(tilDir)
+
+		// Stage all changes
+		if err := gitManager.AddAll(); err != nil {
+			fmt.Printf("Warning: Failed to stage changes to Git: %v\n", err)
+			// Continue anyway
+		} else {
+			// Commit changes
+			if err := gitManager.Commit(message); err != nil {
+				fmt.Printf("Warning: Failed to commit changes to Git: %v\n", err)
+				// Continue anyway
+			} else {
+				// Push changes
+				if err := gitManager.Push(); err != nil {
+					fmt.Printf("Warning: Failed to push changes to Git: %v\n", err)
+					// Continue anyway
+				} else {
+					fmt.Println("Successfully pushed changes to Git")
+				}
+			}
+		}
+	}
+
 	// Clear the staged files
 	if err := m.ClearStagedFiles(); err != nil {
 		return err
@@ -155,7 +189,7 @@ func (m *Manager) CommitEntry(message string) error {
 
 // appendEntryToLog appends a TIL entry to the log file
 func (m *Manager) appendEntryToLog(entry Entry) error {
-	tilFile := filepath.Join(m.Config.DataDir, "data", "til.md")
+	tilFile := filepath.Join(m.Config.DataDir, "til", "til.md")
 
 	// Open the file in append mode
 	f, err := os.OpenFile(tilFile, os.O_APPEND|os.O_WRONLY, 0644)
@@ -187,7 +221,7 @@ func (m *Manager) moveFilesToStorage(files []string, dateStr string) error {
 	stagingDir := filepath.Join(m.Config.DataDir, ".til", "staging")
 
 	// Get the files directory
-	filesDir := filepath.Join(m.Config.DataDir, "data", "files")
+	filesDir := filepath.Join(m.Config.DataDir, "til", "files")
 	if err := os.MkdirAll(filesDir, 0755); err != nil {
 		return err
 	}
@@ -207,26 +241,22 @@ func (m *Manager) moveFilesToStorage(files []string, dateStr string) error {
 
 // GetLatestEntries retrieves the latest TIL entries from the log
 func (m *Manager) GetLatestEntries(limit int) ([]Entry, error) {
-	// Check if the TIL repository is initialized
 	if !m.IsInitialized() {
 		return nil, errors.New("TIL repository not initialized")
 	}
 
-	tilFile := filepath.Join(m.Config.DataDir, "data", "til.md")
+	tilFile := filepath.Join(m.Config.DataDir, "til", "til.md")
 
-	// Read the file
 	content, err := os.ReadFile(tilFile)
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse the entries
 	entries, err := parseEntries(string(content))
 	if err != nil {
 		return nil, err
 	}
 
-	// Apply limit
 	if limit > 0 && limit < len(entries) {
 		return entries[:limit], nil
 	}
@@ -234,7 +264,6 @@ func (m *Manager) GetLatestEntries(limit int) ([]Entry, error) {
 	return entries, nil
 }
 
-// parseEntries parses TIL entries from the log content
 func parseEntries(content string) ([]Entry, error) {
 	lines := strings.Split(content, "\n")
 	entries := []Entry{}
@@ -244,12 +273,10 @@ func parseEntries(content string) ([]Entry, error) {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Skip empty lines
 		if line == "" {
 			continue
 		}
 
-		// Check for entry header (date)
 		if strings.HasPrefix(line, "## ") {
 			if currentEntry != nil {
 				entries = append(entries, *currentEntry)
@@ -258,26 +285,35 @@ func parseEntries(content string) ([]Entry, error) {
 			dateStr := strings.TrimPrefix(line, "## ")
 			date, err := time.Parse("2006-01-02", dateStr)
 			if err != nil {
-				// Skip invalid dates
 				currentEntry = nil
 				continue
 			}
 
 			currentEntry = &Entry{
-				Date:        date,
-				Message:     "",
-				Files:       []string{},
-				IsCommitted: true,
+				Date:         date,
+				Message:      "",
+				Files:        []string{},
+				IsCommitted:  true,
+				NotionSynced: false, // Default to not synced
 			}
 		} else if currentEntry != nil {
-			// Check for files section
+			// Check if this is a metadata line indicating Notion sync status
+			if strings.Contains(line, "<!-- notion-synced:") {
+				// Extract the value between "notion-synced:" and "-->"
+				startIndex := strings.Index(line, "notion-synced:") + len("notion-synced:")
+				endIndex := strings.Index(line, "-->")
+				if startIndex > 0 && endIndex > startIndex {
+					syncStatus := strings.TrimSpace(line[startIndex:endIndex])
+					currentEntry.NotionSynced = syncStatus == "true"
+				}
+				continue
+			}
+
 			if line == "Files:" {
 				continue
 			}
 
-			// Check for file reference
 			if strings.HasPrefix(line, "- [") && strings.Contains(line, "](files/") {
-				// Extract file name
 				start := strings.Index(line, "[") + 1
 				end := strings.Index(line, "]")
 				if start > 0 && end > start {
@@ -285,18 +321,15 @@ func parseEntries(content string) ([]Entry, error) {
 					currentEntry.Files = append(currentEntry.Files, fileName)
 				}
 			} else if currentEntry.Message == "" {
-				// Set the message
 				currentEntry.Message = line
 			}
 		}
 	}
 
-	// Don't forget to add the last entry
 	if currentEntry != nil {
 		entries = append(entries, *currentEntry)
 	}
 
-	// Reverse the order to have the latest entries first
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
 		entries[i], entries[j] = entries[j], entries[i]
 	}
@@ -304,50 +337,39 @@ func parseEntries(content string) ([]Entry, error) {
 	return entries, nil
 }
 
-// AmendLastEntry amends the last committed entry
 func (m *Manager) AmendLastEntry(message string) error {
-	// Check if the TIL repository is initialized
 	if !m.IsInitialized() {
 		return errors.New("TIL repository not initialized")
 	}
 
-	// Check if the message is empty
 	if strings.TrimSpace(message) == "" {
 		return errors.New("commit message cannot be empty")
 	}
 
-	// Get the entries
 	entries, err := m.GetLatestEntries(1)
 	if err != nil {
 		return err
 	}
 
-	// Check if there are any entries
 	if len(entries) == 0 {
 		return errors.New("no entries found to amend")
 	}
 
-	// Get the last entry
 	lastEntry := entries[0]
 
-	// Update the message
 	lastEntry.Message = message
 
-	// Get the staged files
 	stagedFiles, err := m.GetStagedFiles()
 	if err != nil {
 		return err
 	}
 
-	// Add the new files to the entry
 	lastEntry.Files = append(lastEntry.Files, stagedFiles...)
 
-	// Regenerate the TIL file
 	if err := m.regenerateLog(lastEntry); err != nil {
 		return err
 	}
 
-	// Move the new staged files to the files directory
 	if len(stagedFiles) > 0 {
 		dateStr := lastEntry.Date.Format("2006-01-02")
 		if err := m.moveFilesToStorage(stagedFiles, dateStr); err != nil {
@@ -355,7 +377,33 @@ func (m *Manager) AmendLastEntry(message string) error {
 		}
 	}
 
-	// Clear the staged files
+	if m.Config.SyncToGit {
+		if err := m.updateReadme(lastEntry); err != nil {
+			fmt.Printf("Warning: Failed to update README.md: %v\n", err)
+		}
+	}
+
+	// TODO(michaelfromyeg): this code is a monstrosity
+	if m.Config.SyncToGit {
+		tilDir := filepath.Join(m.Config.DataDir, "til")
+		gitManager := NewGitManager(tilDir)
+
+		if err := gitManager.AddAll(); err != nil {
+			fmt.Printf("Warning: Failed to stage changes to Git: %v\n", err)
+		} else {
+			commitMsg := fmt.Sprintf("Amend: %s", message)
+			if err := gitManager.Commit(commitMsg); err != nil {
+				fmt.Printf("Warning: Failed to commit changes to Git: %v\n", err)
+			} else {
+				if err := gitManager.Push(); err != nil {
+					fmt.Printf("Warning: Failed to push changes to Git: %v\n", err)
+				} else {
+					fmt.Println("Successfully pushed amended changes to Git")
+				}
+			}
+		}
+	}
+
 	if err := m.ClearStagedFiles(); err != nil {
 		return err
 	}
@@ -363,23 +411,19 @@ func (m *Manager) AmendLastEntry(message string) error {
 	return nil
 }
 
-// regenerateLog regenerates the TIL log file with an updated entry
 func (m *Manager) regenerateLog(updatedEntry Entry) error {
-	tilFile := filepath.Join(m.Config.DataDir, "data", "til.md")
+	tilFile := filepath.Join(m.Config.DataDir, "til", "til.md")
 
-	// Read the file
 	content, err := os.ReadFile(tilFile)
 	if err != nil {
 		return err
 	}
 
-	// Parse the entries
 	entries, err := parseEntries(string(content))
 	if err != nil {
 		return err
 	}
 
-	// Find and update the entry with the same date
 	found := false
 	for i, entry := range entries {
 		if entry.Date.Format("2006-01-02") == updatedEntry.Date.Format("2006-01-02") {
@@ -393,16 +437,13 @@ func (m *Manager) regenerateLog(updatedEntry Entry) error {
 		return errors.New("entry not found")
 	}
 
-	// Regenerate the file
-	newContent := "# Today I Learned\n\n"
+	newContent := "# Today I Learned\n\n| Date | Entry | Files |\n| --- | --- | --- |\n"
 
-	// Sort entries by date in descending order
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
 		dateStr := entry.Date.Format("2006-01-02")
 		newContent += fmt.Sprintf("\n## %s\n\n%s\n", dateStr, entry.Message)
 
-		// Add file references if any
 		if len(entry.Files) > 0 {
 			newContent += "\nFiles:\n"
 			for _, file := range entry.Files {
@@ -411,8 +452,87 @@ func (m *Manager) regenerateLog(updatedEntry Entry) error {
 		}
 	}
 
-	// Write the file
 	return os.WriteFile(tilFile, []byte(newContent), 0644)
+}
+
+func (m *Manager) updateReadme(newEntry Entry) error {
+	readmePath := filepath.Join(m.Config.DataDir, "til", "README.md")
+
+	_, err := os.Stat(readmePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			readme, err := os.Create(readmePath)
+			if err != nil {
+				return err
+			}
+			defer readme.Close()
+
+			readme.WriteString("# Today I Learned\n\n")
+			readme.WriteString("A collection of things I've learned day to day.\n\n")
+			readme.WriteString("## Entries\n\n")
+			readme.WriteString("| Date | Entry | Files |\n")
+			readme.WriteString("| ---- | ----- | ----- |\n")
+		} else {
+			return err
+		}
+	}
+
+	content, err := os.ReadFile(readmePath)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	tableStart := -1
+
+	for i, line := range lines {
+		if strings.HasPrefix(line, "| Date | Entry | Files |") {
+			tableStart = i
+			break
+		}
+	}
+
+	if tableStart == -1 {
+		f, err := os.OpenFile(readmePath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		f.WriteString("\n## Entries\n\n")
+		f.WriteString("| Date | Entry | Files |\n")
+		f.WriteString("| ---- | ----- | ----- |\n")
+
+		tableStart = len(lines)
+		lines = append(lines, "| Date | Entry | Files |", "| ---- | ----- | ----- |")
+	}
+
+	// Format the new entry row
+	dateStr := newEntry.Date.Format("2006-01-02")
+	filesStr := ""
+
+	if len(newEntry.Files) > 0 {
+		fileLinks := make([]string, 0, len(newEntry.Files))
+		for _, file := range newEntry.Files {
+			// Create relative link to the file
+			fileLinks = append(fileLinks, fmt.Sprintf("[%s](til/files/%s_%s)", file, dateStr, file))
+		}
+		filesStr = strings.Join(fileLinks, ", ")
+	}
+
+	newRow := fmt.Sprintf("| %s | %s | %s |", dateStr, newEntry.Message, filesStr)
+
+	// Insert the new row right after the table header
+	updatedLines := append(
+		lines[:tableStart+2],
+		append(
+			[]string{newRow},
+			lines[tableStart+2:]...,
+		)...,
+	)
+
+	// Write the updated content
+	return os.WriteFile(readmePath, []byte(strings.Join(updatedLines, "\n")), 0644)
 }
 
 // copyFile copies a file from src to dst

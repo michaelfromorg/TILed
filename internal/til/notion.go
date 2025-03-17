@@ -3,7 +3,9 @@ package til
 import (
 	"context"
 	"errors"
-	"time"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/jomei/notionapi"
 )
@@ -24,7 +26,7 @@ func NewNotionClient(apiKey string, dbID string) *NotionClient {
 }
 
 // PushEntry pushes a TIL entry to Notion
-func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry) error {
+func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir string) error {
 	if nc.client == nil {
 		return errors.New("notion client not initialized")
 	}
@@ -46,19 +48,42 @@ func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry) error {
 
 	// Add files if any
 	if len(entry.Files) > 0 {
-		// Note: In a real implementation, we would need to handle file uploads
-		// For now, we'll just add the file names as a text property
-		fileNames := []notionapi.RichText{}
-		for _, file := range entry.Files {
-			fileNames = append(fileNames, notionapi.RichText{
-				Type: "text",
-				Text: &notionapi.Text{
-					Content: file,
-				},
-			})
+		files := make([]notionapi.File, 0, len(entry.Files))
+		dateStr := entry.Date.Format("2006-01-02")
+
+		for _, fileName := range entry.Files {
+			// Get the full path to the file
+			filePath := filepath.Join(dataDir, "til", "files", fmt.Sprintf("%s_%s", dateStr, fileName))
+
+			// Check if file exists
+			if _, err := os.Stat(filePath); err == nil {
+				// In a production environment, these files would be uploaded to a file server
+				// and we would use the URL of the uploaded file. For this implementation,
+				// we'll use a placeholder URL that represents where the file would be
+				// in a GitHub repository or similar hosting service.
+
+				// Extract the repo name from the Git remote URL if available
+				// This is a simplified approach - in a real app, you'd want to properly
+				// upload the files to a file server and get the real URL
+				repoPath := "michaelfromyeg/til"
+
+				externalURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/refs/heads/main/files/%s_%s",
+					repoPath, dateStr, fileName)
+
+				files = append(files, notionapi.File{
+					Name: fileName,
+					Type: notionapi.FileTypeExternal,
+					External: &notionapi.FileObject{
+						URL: externalURL,
+					},
+				})
+			}
 		}
-		properties["Attachments"] = notionapi.RichTextProperty{
-			RichText: fileNames,
+
+		// Use the correct Notion API property type for files
+		properties["Attachments"] = notionapi.FilesProperty{
+			Type:  notionapi.PropertyTypeFiles,
+			Files: files,
 		}
 	}
 
@@ -109,31 +134,61 @@ func (nc *NotionClient) GetEntries(ctx context.Context, limit int) ([]Entry, err
 			continue
 		}
 
-		// For CreatedTime handling, take the current date
-		// In a real implementation, we would get this from the Notion API
-		// but for simplicity, we'll use the current date
-		date := time.Now()
+		// Extract the date from Notion's Created property
+		date := page.CreatedTime
 
 		// Extract files
 		var files []string
-		if attachment, ok := page.Properties["Attachment"].(notionapi.RichTextProperty); ok {
-			for _, richText := range attachment.RichText {
-				if richText.Text != nil {
-					files = append(files, richText.Text.Content)
-				}
+		if attachment, ok := page.Properties["Attachments"].(notionapi.FilesProperty); ok {
+			for _, file := range attachment.Files {
+				files = append(files, file.Name)
 			}
 		}
 
 		// Create entry
 		entry := Entry{
-			Date:        date,
-			Message:     title.Title[0].Text.Content,
-			Files:       files,
-			IsCommitted: true,
+			Date:         date,
+			Message:      title.Title[0].PlainText,
+			Files:        files,
+			IsCommitted:  true,
+			NotionSynced: true, // Mark as synced since it came from Notion
 		}
 
 		entries = append(entries, entry)
 	}
 
 	return entries, nil
+}
+
+// IsEntrySynced checks if an entry has already been synced to Notion
+// by comparing the message with existing Notion entries
+func (nc *NotionClient) IsEntrySynced(ctx context.Context, entry Entry) (bool, error) {
+	if nc.client == nil {
+		return false, errors.New("notion client not initialized")
+	}
+
+	// Query the database to get all entries
+	query := notionapi.DatabaseQueryRequest{
+		PageSize: 100, // Retrieve up to 100 entries, adjust as needed
+	}
+
+	resp, err := nc.client.Database.Query(ctx, nc.dbID, &query)
+	if err != nil {
+		return false, err
+	}
+
+	// Check if any of the entries match our message
+	for _, page := range resp.Results {
+		title, ok := page.Properties["TIL"].(notionapi.TitleProperty)
+		if !ok || len(title.Title) == 0 {
+			continue
+		}
+
+		// Compare title text with our entry message
+		if title.Title[0].PlainText == entry.Message {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

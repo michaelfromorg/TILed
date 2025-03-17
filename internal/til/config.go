@@ -39,6 +39,10 @@ func LoadConfig(dir string) (Config, error) {
 			config.NotionAPIKey = value
 		case "NOTION_DB_ID":
 			config.NotionDBID = value
+		case "SYNC_TO_GIT":
+			config.SyncToGit = value == "true"
+		case "GIT_REMOTE_URL":
+			config.GitRemoteURL = value
 		}
 	}
 
@@ -66,6 +70,13 @@ func SaveConfig(config Config) error {
 		f.WriteString("NOTION_DB_ID=" + config.NotionDBID + "\n")
 	} else {
 		f.WriteString("SYNC_TO_NOTION=false\n")
+	}
+
+	if config.SyncToGit {
+		f.WriteString("SYNC_TO_GIT=true\n")
+		f.WriteString("GIT_REMOTE_URL=" + config.GitRemoteURL + "\n")
+	} else {
+		f.WriteString("SYNC_TO_GIT=false\n")
 	}
 
 	return nil

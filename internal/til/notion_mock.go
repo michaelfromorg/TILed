@@ -17,7 +17,9 @@ func NewMockNotionClient() *MockNotionClient {
 }
 
 // PushEntry pushes a TIL entry to the mock client
-func (mnc *MockNotionClient) PushEntry(ctx context.Context, entry Entry) error {
+func (mnc *MockNotionClient) PushEntry(ctx context.Context, entry Entry, dataDir string) error {
+	// Mark the entry as synced and add it to our collection
+	entry.NotionSynced = true
 	mnc.entries = append(mnc.entries, entry)
 	return nil
 }
@@ -45,10 +47,21 @@ func (mnc *MockNotionClient) GetEntries(ctx context.Context, limit int) ([]Entry
 	return sortedEntries, nil
 }
 
+// IsEntrySynced checks if an entry has already been synced to Notion
+func (mnc *MockNotionClient) IsEntrySynced(ctx context.Context, entry Entry) (bool, error) {
+	for _, e := range mnc.entries {
+		if e.Message == entry.Message {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // NotionClientInterface is an interface for the Notion client
 type NotionClientInterface interface {
-	PushEntry(ctx context.Context, entry Entry) error
+	PushEntry(ctx context.Context, entry Entry, dataDir string) error
 	GetEntries(ctx context.Context, limit int) ([]Entry, error)
+	IsEntrySynced(ctx context.Context, entry Entry) (bool, error)
 }
 
 // Ensure the mock implements the interface

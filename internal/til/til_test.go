@@ -29,11 +29,11 @@ func TestManager_Init(t *testing.T) {
 	assert.True(t, manager.IsInitialized())
 
 	// Verify that the directories and files were created
-	dataDir := filepath.Join(tempDir, "data")
-	filesDir := filepath.Join(dataDir, "files")
-	tilFile := filepath.Join(dataDir, "til.md")
+	tilDir := filepath.Join(tempDir, "til")
+	filesDir := filepath.Join(tilDir, "files")
+	tilFile := filepath.Join(tilDir, "til.md")
 
-	assert.DirExists(t, dataDir)
+	assert.DirExists(t, tilDir)
 	assert.DirExists(t, filesDir)
 	assert.FileExists(t, tilFile)
 

@@ -3,6 +3,7 @@ package til
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -278,6 +279,9 @@ func TestParseEntries(t *testing.T) {
 	// Test parsing entries from markdown content
 	content := `# Today I Learned
 
+| Date | Entry | Files |
+| --- | --- | --- |
+
 ## 2023-01-01
 
 First entry
@@ -322,6 +326,9 @@ Files:
 func TestInvalidDateInLog(t *testing.T) {
 	// Test parsing entries with an invalid date
 	content := `# Today I Learned
+
+| Date | Entry | Files |
+| --- | --- | --- |
 
 ## Not a date
 
@@ -369,4 +376,124 @@ func TestCopyFile(t *testing.T) {
 	// Test error case - source doesn't exist
 	err = copyFile(filepath.Join(tempDir, "nonexistent.txt"), dstPath)
 	assert.Error(t, err)
+}
+
+func TestUpdateReadme(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "til-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create til directory
+	tilDir := filepath.Join(tempDir, "til")
+	err = os.MkdirAll(tilDir, 0755)
+	assert.NoError(t, err)
+
+	// Create a Manager with the temporary directory
+	config := Config{
+		DataDir:   tempDir,
+		SyncToGit: true,
+	}
+	manager := NewManager(config)
+
+	// Create an entry
+	now := time.Now()
+	entry := Entry{
+		Date:        now,
+		Message:     "Test entry",
+		Files:       []string{"test.txt"},
+		IsCommitted: true,
+	}
+
+	// Test updating a non-existent README
+	err = manager.updateReadme(entry)
+	assert.NoError(t, err)
+
+	// Check if README was created
+	readmePath := filepath.Join(tilDir, "README.md")
+	_, err = os.Stat(readmePath)
+	assert.NoError(t, err)
+
+	// Read the README content
+	content, err := os.ReadFile(readmePath)
+	assert.NoError(t, err)
+
+	// Verify that the entry is in the README
+	assert.Contains(t, string(content), "Test entry")
+	assert.Contains(t, string(content), now.Format("2006-01-02"))
+	assert.Contains(t, string(content), "test.txt")
+
+	// Test updating an existing README
+	entry2 := Entry{
+		Date:        now.Add(24 * time.Hour),
+		Message:     "Second entry",
+		Files:       []string{"test2.txt"},
+		IsCommitted: true,
+	}
+
+	err = manager.updateReadme(entry2)
+	assert.NoError(t, err)
+
+	// Read the README content again
+	content, err = os.ReadFile(readmePath)
+	assert.NoError(t, err)
+
+	// Verify that both entries are in the README
+	assert.Contains(t, string(content), "Test entry")
+	assert.Contains(t, string(content), "Second entry")
+	assert.Contains(t, string(content), entry2.Date.Format("2006-01-02"))
+}
+
+func TestGitIntegration(t *testing.T) {
+	// Skip this test if git is not installed
+	_, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("Git not installed, skipping test")
+	}
+
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "til-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create til directory
+	tilDir := filepath.Join(tempDir, "til")
+	err = os.MkdirAll(tilDir, 0755)
+	assert.NoError(t, err)
+
+	// Create a Manager with Git enabled
+	config := Config{
+		DataDir:      tempDir,
+		SyncToGit:    true,
+		GitRemoteURL: "git@github.com:michaelfromyeg/til.git", // Fake URL for testing
+	}
+	manager := NewManager(config)
+
+	// Initialize the repository
+	err = manager.Init()
+	assert.NoError(t, err)
+
+	// Initialize Git
+	gitManager := NewGitManager(tilDir)
+	err = gitManager.Init("git@github.com:michaelfromyeg/til.git")
+	assert.NoError(t, err)
+
+	// Create a test file
+	testFilePath := filepath.Join(tempDir, "test.txt")
+	err = os.WriteFile(testFilePath, []byte("Test content"), 0644)
+	assert.NoError(t, err)
+
+	// Add the file
+	err = manager.AddFile(testFilePath)
+	assert.NoError(t, err)
+
+	// The commit will try to push, which would fail with our fake URL
+	// But it should handle the error gracefully and continue
+	err = manager.CommitEntry("Test commit with Git integration")
+	assert.NoError(t, err)
+
+	// Verify that a git repository was created
+	gitDir := filepath.Join(tilDir, ".git")
+	_, err = os.Stat(gitDir)
+	assert.NoError(t, err)
 }
