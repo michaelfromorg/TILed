@@ -5,26 +5,29 @@
 
 rm -rf ../til
 
-go build -o til
+make build
 
-cp til ../tilcli
+mv tilcli ..
 
 cd ..
 
+### INIT ###
 ./tilcli init
 # y, y, paste keys
 
+### ADD, COMMIT, LOG ###
 ./tilcli add ./test_file.txt
 ./tilcli commit -m "First entry with YAML storage"
-
 ./tilcli log
 
+### AMEND, STATUS ###
 ./tilcli add ./test_file2.txt
+./til status
 ./tilcli commit --amend -m "First entry amended with YAML storage"
 
+### COMMIT (x2), PUSH ###
 ./tilcli add ./test_file3.txt
 ./tilcli commit -m "Second entry with YAML storage"
-
 ./tilcli push --git
 
 cat ./til/til.yml
