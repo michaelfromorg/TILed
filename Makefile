@@ -1,6 +1,6 @@
 .PHONY: build clean test test-coverage install run-init run-add run-commit run-log run-push lint help deps
 
-BINARY_NAME=til
+BINARY_NAME=tilcli
 COVERAGE_FILE=coverage.out
 GO_FILES=$(shell find . -name "*.go" -not -path "./vendor/*")
 

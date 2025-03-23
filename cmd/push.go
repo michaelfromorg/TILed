@@ -67,13 +67,23 @@ Use --force to push all entries to Notion, even if they have been pushed before.
 		pushToNotion := config.SyncToNotion && (notionOnly || (!notionOnly && !gitOnly))
 		pushToGit := config.SyncToGit && (gitOnly || (!notionOnly && !gitOnly))
 
+		useYAML := manager.IsYAMLInitialized()
+
 		// Push to Notion if configured and requested
 		if pushToNotion {
 			if !config.SyncToNotion {
 				fmt.Println("Notion sync is not enabled. Run 'til init' to configure Notion sync.")
 			} else {
 				// Get all entries
-				entries, err := manager.GetLatestEntries(0)
+				var entries []til.Entry
+				var err error
+
+				if useYAML {
+					entries, err = manager.GetLatestYAMLEntries(0)
+				} else {
+					entries, err = manager.GetLatestEntries(0)
+				}
+
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Error getting entries: %v\n", err)
 					os.Exit(1)
@@ -123,8 +133,15 @@ Use --force to push all entries to Notion, even if they have been pushed before.
 					// Update local state to mark as synced
 					entryCopy := entry
 					entryCopy.NotionSynced = true
-					if err := manager.UpdateEntryNotionSyncStatus(entryCopy); err != nil {
-						fmt.Fprintf(os.Stderr, "Failed to update local sync status: %v\n", err)
+
+					if useYAML {
+						if err := manager.UpdateYAMLEntryNotionSyncStatus(entryCopy); err != nil {
+							fmt.Fprintf(os.Stderr, "Failed to update local sync status: %v\n", err)
+						}
+					} else {
+						if err := manager.UpdateEntryNotionSyncStatus(entryCopy); err != nil {
+							fmt.Fprintf(os.Stderr, "Failed to update local sync status: %v\n", err)
+						}
 					}
 
 					pushed++

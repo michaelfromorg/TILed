@@ -26,16 +26,32 @@ type Entry struct {
 }
 
 type Manager struct {
-	Config Config
+	Config  Config
+	UseYAML bool
 }
 
 func NewManager(config Config) *Manager {
+	// Check if YAML repository exists
+	tilDir := filepath.Join(config.DataDir, "til")
+	yamlFile := filepath.Join(tilDir, "til.yml")
+	useYAML := false
+
+	if _, err := os.Stat(yamlFile); err == nil {
+		useYAML = true
+	}
+
 	return &Manager{
-		Config: config,
+		Config:  config,
+		UseYAML: useYAML,
 	}
 }
 
+// IsInitialized checks if either YAML or Markdown repository is initialized
 func (m *Manager) IsInitialized() bool {
+	if m.UseYAML {
+		return m.IsYAMLInitialized()
+	}
+
 	tilDir := filepath.Join(m.Config.DataDir, "til")
 	tilFile := filepath.Join(tilDir, "til.md")
 
@@ -45,6 +61,10 @@ func (m *Manager) IsInitialized() bool {
 }
 
 func (m *Manager) Init() error {
+	if m.UseYAML {
+		return m.InitYAML()
+	}
+
 	if m.IsInitialized() {
 		return errors.New("TIL repository already initialized")
 	}
@@ -74,6 +94,10 @@ func (m *Manager) Init() error {
 
 // Grabs all entries and validates what is synced to Notion (or not)
 func (m *Manager) UpdateEntryNotionSyncStatus(entry Entry) error {
+	if m.UseYAML {
+		return m.UpdateYAMLEntryNotionSyncStatus(entry)
+	}
+
 	if !m.IsInitialized() {
 		return errors.New("TIL repository not initialized")
 	}

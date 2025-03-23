@@ -105,6 +105,10 @@ func (m *Manager) ClearStagedFiles() error {
 
 // CommitEntry commits a new TIL entry with the staged files
 func (m *Manager) CommitEntry(message string) error {
+	if m.UseYAML {
+		return m.CommitYAMLEntry(message)
+	}
+
 	// Check if the TIL repository is initialized
 	if !m.IsInitialized() {
 		return errors.New("TIL repository not initialized")
@@ -241,6 +245,10 @@ func (m *Manager) moveFilesToStorage(files []string, dateStr string) error {
 
 // GetLatestEntries retrieves the latest TIL entries from the log
 func (m *Manager) GetLatestEntries(limit int) ([]Entry, error) {
+	if m.UseYAML {
+		return m.GetLatestYAMLEntries(limit)
+	}
+
 	if !m.IsInitialized() {
 		return nil, errors.New("TIL repository not initialized")
 	}
@@ -338,6 +346,10 @@ func parseEntries(content string) ([]Entry, error) {
 }
 
 func (m *Manager) AmendLastEntry(message string) error {
+	if m.UseYAML {
+		return m.AmendLastYAMLEntry(message)
+	}
+
 	if !m.IsInitialized() {
 		return errors.New("TIL repository not initialized")
 	}

@@ -1,6 +1,7 @@
 ### Custom
 
 tiled
+tilcli
 .env
 
 # within-repo testing

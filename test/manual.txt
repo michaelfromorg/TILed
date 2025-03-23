@@ -1,0 +1,31 @@
+# manual commands to run step-by-step
+
+# ASSUME: the project is at /TILed, the test repo is at /til 
+# ASSUME: test_file.txt, test_file2.txt, and test_file3.txt exist 1 level up
+
+rm -rf ../til
+
+go build -o til
+
+cp til ../tilcli
+
+cd ..
+
+./tilcli init
+# y, y, paste keys
+
+./tilcli add ./test_file.txt
+./tilcli commit -m "First entry with YAML storage"
+
+./tilcli log
+
+./tilcli add ./test_file2.txt
+./tilcli commit --amend -m "First entry amended with YAML storage"
+
+./tilcli add ./test_file3.txt
+./tilcli commit -m "Second entry with YAML storage"
+
+./tilcli push --git
+
+cat ./til/til.yml
+cat ./til/README.md

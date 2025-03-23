@@ -11,6 +11,7 @@ import (
 )
 
 func init() {
+	initCmd.Flags().Bool("yaml", true, "Initialize with YAML storage (default: true)")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -58,8 +59,19 @@ You can also sync your TIL entries with a Notion database and/or a Git repositor
 			return
 		}
 
-		if err := manager.Init(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing TIL repository: %v\n", err)
+		// Check if YAML flag is set
+		useYAML, _ := cmd.Flags().GetBool("yaml")
+
+		// Initialize the repository
+		var initErr error
+		if useYAML {
+			initErr = manager.InitYAML()
+		} else {
+			initErr = manager.Init()
+		}
+
+		if initErr != nil {
+			fmt.Fprintf(os.Stderr, "Error initializing TIL repository: %v\n", initErr)
 			os.Exit(1)
 		}
 

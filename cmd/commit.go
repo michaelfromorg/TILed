@@ -50,9 +50,18 @@ Use --amend to amend the previous commit.`,
 		message, _ := cmd.Flags().GetString("message")
 		amend, _ := cmd.Flags().GetBool("amend")
 
+		useYAML := manager.IsYAMLInitialized()
+
 		// Check if amending
 		if amend {
-			if err := manager.AmendLastEntry(message); err != nil {
+			var err error
+			if useYAML {
+				err = manager.AmendLastYAMLEntry(message)
+			} else {
+				err = manager.AmendLastEntry(message)
+			}
+
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error amending commit: %v\n", err)
 				os.Exit(1)
 			}
@@ -91,13 +100,17 @@ Use --amend to amend the previous commit.`,
 			}
 		}
 
-		// Commit the entry
-		if err := manager.CommitEntry(message); err != nil {
-			fmt.Fprintf(os.Stderr, "Error committing entry: %v\n", err)
-			os.Exit(1)
+		var commitErr error
+		if useYAML {
+			commitErr = manager.CommitYAMLEntry(message)
+		} else {
+			commitErr = manager.CommitEntry(message)
 		}
 
-		fmt.Println("Committed successfully")
+		if commitErr != nil {
+			fmt.Fprintf(os.Stderr, "Error committing entry: %v\n", commitErr)
+			os.Exit(1)
+		}
 
 		// If Git sync is enabled, print a message
 		if config.SyncToGit {
