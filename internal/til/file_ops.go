@@ -191,34 +191,6 @@ func (m *Manager) CommitEntry(message string) error {
 	return nil
 }
 
-// appendEntryToLog appends a TIL entry to the log file
-func (m *Manager) appendEntryToLog(entry Entry) error {
-	tilFile := filepath.Join(m.Config.DataDir, "til", "til.md")
-
-	// Open the file in append mode
-	f, err := os.OpenFile(tilFile, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	// Format the entry
-	dateStr := entry.Date.Format("2006-01-02")
-	entryText := fmt.Sprintf("\n## %s\n\n%s\n", dateStr, entry.Message)
-
-	// Add file references if any
-	if len(entry.Files) > 0 {
-		entryText += "\nFiles:\n"
-		for _, file := range entry.Files {
-			entryText += fmt.Sprintf("- [%s](files/%s_%s)\n", file, dateStr, file)
-		}
-	}
-
-	// Write to the file
-	_, err = f.WriteString(entryText)
-	return err
-}
-
 // moveFilesToStorage moves the staged files to the storage directory
 func (m *Manager) moveFilesToStorage(files []string, dateStr string) error {
 	// Get the staging directory
@@ -272,11 +244,13 @@ func (m *Manager) GetLatestEntries(limit int) ([]Entry, error) {
 	return entries, nil
 }
 
+// Update in internal/til/file_ops.go
 func parseEntries(content string) ([]Entry, error) {
 	lines := strings.Split(content, "\n")
 	entries := []Entry{}
 
 	var currentEntry *Entry
+	var readMoreLine string // Track if we found a "Read more" line
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -300,6 +274,7 @@ func parseEntries(content string) ([]Entry, error) {
 			currentEntry = &Entry{
 				Date:         date,
 				Message:      "",
+				MessageBody:  "",
 				Files:        []string{},
 				IsCommitted:  true,
 				NotionSynced: false, // Default to not synced
@@ -314,6 +289,13 @@ func parseEntries(content string) ([]Entry, error) {
 					syncStatus := strings.TrimSpace(line[startIndex:endIndex])
 					currentEntry.NotionSynced = syncStatus == "true"
 				}
+				continue
+			}
+
+			// Check for "Read more" link for body content
+			if strings.HasPrefix(line, "[Read more]") && strings.Contains(line, "_body.md)") {
+				readMoreLine = line
+				// We'll try to load the body content if needed
 				continue
 			}
 
@@ -338,8 +320,23 @@ func parseEntries(content string) ([]Entry, error) {
 		entries = append(entries, *currentEntry)
 	}
 
+	// Reverse the entries so latest is first
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
 		entries[i], entries[j] = entries[j], entries[i]
+	}
+
+	// Load message bodies for entries that have a "Read more" link
+	if readMoreLine != "" {
+		for i, entry := range entries {
+			bodyFilePath := filepath.Join("til", "files", fmt.Sprintf("%s_body.md", entry.Date.Format("2006-01-02")))
+			if _, err := os.Stat(bodyFilePath); err == nil {
+				// File exists, read the body content
+				bodyContent, err := os.ReadFile(bodyFilePath)
+				if err == nil {
+					entries[i].MessageBody = string(bodyContent)
+				}
+			}
+		}
 	}
 
 	return entries, nil
@@ -467,6 +464,7 @@ func (m *Manager) regenerateLog(updatedEntry Entry) error {
 	return os.WriteFile(tilFile, []byte(newContent), 0644)
 }
 
+// Update in internal/til/file_ops.go
 func (m *Manager) updateReadme(newEntry Entry) error {
 	readmePath := filepath.Join(m.Config.DataDir, "til", "README.md")
 
@@ -521,6 +519,13 @@ func (m *Manager) updateReadme(newEntry Entry) error {
 
 	// Format the new entry row
 	dateStr := newEntry.Date.Format("2006-01-02")
+
+	// Format the entry message, including a link to the body if available
+	entryMsg := newEntry.Message
+	if newEntry.MessageBody != "" {
+		entryMsg = fmt.Sprintf("[%s](til/files/%s_body.md)", entryMsg, dateStr)
+	}
+
 	filesStr := ""
 
 	if len(newEntry.Files) > 0 {
@@ -532,7 +537,7 @@ func (m *Manager) updateReadme(newEntry Entry) error {
 		filesStr = strings.Join(fileLinks, ", ")
 	}
 
-	newRow := fmt.Sprintf("| %s | %s | %s |", dateStr, newEntry.Message, filesStr)
+	newRow := fmt.Sprintf("| %s | %s | %s |", dateStr, entryMsg, filesStr)
 
 	// Insert the new row right after the table header
 	updatedLines := append(
@@ -565,5 +570,227 @@ func copyFile(src, dst string) error {
 
 	// Copy the contents
 	_, err = io.Copy(destFile, sourceFile)
+	return err
+}
+
+// Add these methods to internal/til/file_ops.go
+
+// CommitEntryWithBody commits a new TIL entry with the staged files and a message body
+func (m *Manager) CommitEntryWithBody(message, messageBody string) error {
+	// Check if the TIL repository is initialized
+	if !m.IsInitialized() {
+		return errors.New("TIL repository not initialized")
+	}
+
+	// Check if the message is empty
+	if strings.TrimSpace(message) == "" {
+		return errors.New("commit message cannot be empty")
+	}
+
+	// Get the current date
+	now := time.Now()
+	dateStr := now.Format("2006-01-02")
+
+	// Get the staged files
+	stagedFiles, err := m.GetStagedFiles()
+	if err != nil {
+		return err
+	}
+
+	// Create the entry
+	entry := Entry{
+		Date:        now,
+		Message:     message,
+		MessageBody: messageBody,
+		Files:       stagedFiles,
+		IsCommitted: true,
+	}
+
+	// Add the entry to the TIL file
+	if err := m.appendEntryToLog(entry); err != nil {
+		return err
+	}
+
+	// If there's a message body, save it as a markdown file
+	if messageBody != "" {
+		if err := m.saveMessageBody(entry); err != nil {
+			return err
+		}
+	}
+
+	// Move the staged files to the files directory
+	if len(stagedFiles) > 0 {
+		if err := m.moveFilesToStorage(stagedFiles, dateStr); err != nil {
+			return err
+		}
+	}
+
+	// Update README.md if Git sync is enabled
+	if m.Config.SyncToGit {
+		if err := m.updateReadme(entry); err != nil {
+			fmt.Printf("Warning: Failed to update README.md: %v\n", err)
+			// Continue anyway
+		}
+	}
+
+	// Sync with Git if enabled
+	if m.Config.SyncToGit {
+		tilDir := filepath.Join(m.Config.DataDir, "til")
+		gitManager := NewGitManager(tilDir)
+
+		// Stage all changes
+		if err := gitManager.AddAll(); err != nil {
+			fmt.Printf("Warning: Failed to stage changes to Git: %v\n", err)
+			// Continue anyway
+		} else {
+			// Commit changes
+			if err := gitManager.Commit(message); err != nil {
+				fmt.Printf("Warning: Failed to commit changes to Git: %v\n", err)
+				// Continue anyway
+			} else {
+				// Push changes
+				if err := gitManager.Push(); err != nil {
+					fmt.Printf("Warning: Failed to push changes to Git: %v\n", err)
+					// Continue anyway
+				} else {
+					fmt.Println("Successfully pushed changes to Git")
+				}
+			}
+		}
+	}
+
+	// Clear the staged files
+	if err := m.ClearStagedFiles(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// saveMessageBody saves the message body as a markdown file
+func (m *Manager) saveMessageBody(entry Entry) error {
+	if entry.MessageBody == "" {
+		return nil
+	}
+
+	dateStr := entry.Date.Format("2006-01-02")
+	filesDir := filepath.Join(m.Config.DataDir, "til", "files")
+	bodyFilename := fmt.Sprintf("%s_body.md", dateStr)
+	bodyPath := filepath.Join(filesDir, bodyFilename)
+
+	// Create the file
+	return os.WriteFile(bodyPath, []byte(entry.MessageBody), 0644)
+}
+
+// AmendLastEntryWithBody amends the last entry with a new message and body
+func (m *Manager) AmendLastEntryWithBody(message, messageBody string) error {
+	if !m.IsInitialized() {
+		return errors.New("TIL repository not initialized")
+	}
+
+	if strings.TrimSpace(message) == "" {
+		return errors.New("commit message cannot be empty")
+	}
+
+	entries, err := m.GetLatestEntries(1)
+	if err != nil {
+		return err
+	}
+
+	if len(entries) == 0 {
+		return errors.New("no entries found to amend")
+	}
+
+	lastEntry := entries[0]
+
+	lastEntry.Message = message
+	lastEntry.MessageBody = messageBody
+
+	stagedFiles, err := m.GetStagedFiles()
+	if err != nil {
+		return err
+	}
+
+	lastEntry.Files = append(lastEntry.Files, stagedFiles...)
+
+	if err := m.regenerateLog(lastEntry); err != nil {
+		return err
+	}
+
+	// If there's a message body, save it as a markdown file
+	if messageBody != "" {
+		if err := m.saveMessageBody(lastEntry); err != nil {
+			return err
+		}
+	}
+
+	if len(stagedFiles) > 0 {
+		dateStr := lastEntry.Date.Format("2006-01-02")
+		if err := m.moveFilesToStorage(stagedFiles, dateStr); err != nil {
+			return err
+		}
+	}
+
+	if m.Config.SyncToGit {
+		if err := m.updateReadme(lastEntry); err != nil {
+			fmt.Printf("Warning: Failed to update README.md: %v\n", err)
+		}
+	}
+
+	// Sync with Git if enabled
+	if m.Config.SyncToGit {
+		tilDir := filepath.Join(m.Config.DataDir, "til")
+		gitManager := NewGitManager(tilDir)
+
+		if err := gitManager.AddAll(); err != nil {
+			fmt.Printf("Warning: Failed to stage changes to Git: %v\n", err)
+		} else {
+			commitMsg := fmt.Sprintf("Amend: %s", message)
+			if err := gitManager.Commit(commitMsg); err != nil {
+				fmt.Printf("Warning: Failed to commit changes to Git: %v\n", err)
+			} else {
+				if err := gitManager.Push(); err != nil {
+					fmt.Printf("Warning: Failed to push changes to Git: %v\n", err)
+				} else {
+					fmt.Println("Successfully pushed amended changes to Git")
+				}
+			}
+		}
+	}
+
+	// Clear the staged files
+	return m.ClearStagedFiles()
+}
+
+// Update appendEntryToLog to include the message body
+func (m *Manager) appendEntryToLog(entry Entry) error {
+	tilFile := filepath.Join(m.Config.DataDir, "til", "til.md")
+
+	// Open the file in append mode
+	f, err := os.OpenFile(tilFile, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// Format the entry
+	dateStr := entry.Date.Format("2006-01-02")
+	entryText := fmt.Sprintf("\n## %s\n\n%s\n", dateStr, entry.Message)
+
+	// Add message body reference if any
+	if entry.MessageBody != "" {
+		entryText += fmt.Sprintf("\n[Read more](files/%s_body.md)\n", dateStr)
+	}
+
+	// Add file references if any
+	if len(entry.Files) > 0 {
+		entryText += "\nFiles:\n"
+		for _, file := range entry.Files {
+			entryText += fmt.Sprintf("- [%s](files/%s_%s)\n", file, dateStr, file)
+		}
+	}
+
+	// Write to the file
+	_, err = f.WriteString(entryText)
 	return err
 }

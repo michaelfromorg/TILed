@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/michaelfromorg/tiled/internal/til"
@@ -50,15 +51,104 @@ Use --amend to amend the previous commit.`,
 		message, _ := cmd.Flags().GetString("message")
 		amend, _ := cmd.Flags().GetBool("amend")
 
+		// If no message provided, open editor
+		messageBody := ""
+		if message == "" && !amend {
+			// Prepare initial content
+			initialContent := `
+# Enter your TIL commit message. The first line will be used as the short message.
+# Lines starting with '#' will be ignored.
+# An empty message aborts the commit.
+
+`
+			// Open editor
+			content, err := til.OpenEditor(initialContent)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error opening editor: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Process the content (remove comments and empty lines at the start)
+			lines := strings.Split(content, "\n")
+			processedLines := []string{}
+			for _, line := range lines {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				processedLines = append(processedLines, line)
+			}
+			content = strings.Join(processedLines, "\n")
+			content = strings.TrimSpace(content)
+
+			// Check if message is empty
+			if content == "" {
+				fmt.Println("Aborting commit due to empty message")
+				os.Exit(0)
+			}
+
+			// Split into title and body
+			message, messageBody = til.SplitCommitMessage(content)
+		}
+
 		useYAML := manager.IsYAMLInitialized()
 
 		// Check if amending
 		if amend {
+			// If amending without message, open editor with current message
+			if message == "" {
+				var currentEntry til.Entry
+				if useYAML {
+					entries, err := manager.GetLatestYAMLEntries(1)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Error getting latest entry: %v\n", err)
+						os.Exit(1)
+					}
+					if len(entries) == 0 {
+						fmt.Fprintln(os.Stderr, "No entries found to amend.")
+						os.Exit(1)
+					}
+					currentEntry = entries[0]
+				} else {
+					entries, err := manager.GetLatestEntries(1)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Error getting latest entry: %v\n", err)
+						os.Exit(1)
+					}
+					if len(entries) == 0 {
+						fmt.Fprintln(os.Stderr, "No entries found to amend.")
+						os.Exit(1)
+					}
+					currentEntry = entries[0]
+				}
+
+				// Prepare initial content with current message
+				initialContent := currentEntry.Message
+				if currentEntry.MessageBody != "" {
+					initialContent += "\n\n" + currentEntry.MessageBody
+				}
+
+				// Open editor
+				content, err := til.OpenEditor(initialContent)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error opening editor: %v\n", err)
+					os.Exit(1)
+				}
+
+				// Check if message is empty
+				if strings.TrimSpace(content) == "" {
+					fmt.Println("Aborting commit due to empty message")
+					os.Exit(0)
+				}
+
+				// Split into title and body
+				message, messageBody = til.SplitCommitMessage(content)
+			}
+
 			var err error
 			if useYAML {
-				err = manager.AmendLastYAMLEntry(message)
+				err = manager.AmendLastYAMLEntryWithBody(message, messageBody)
 			} else {
-				err = manager.AmendLastEntry(message)
+				err = manager.AmendLastEntryWithBody(message, messageBody)
 			}
 
 			if err != nil {
@@ -102,9 +192,9 @@ Use --amend to amend the previous commit.`,
 
 		var commitErr error
 		if useYAML {
-			commitErr = manager.CommitYAMLEntry(message)
+			commitErr = manager.CommitYAMLEntryWithBody(message, messageBody)
 		} else {
-			commitErr = manager.CommitEntry(message)
+			commitErr = manager.CommitEntryWithBody(message, messageBody)
 		}
 
 		if commitErr != nil {

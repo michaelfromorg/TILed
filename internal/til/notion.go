@@ -25,6 +25,8 @@ func NewNotionClient(apiKey string, dbID string) *NotionClient {
 	}
 }
 
+// Update in internal/til/notion.go
+
 // PushEntry pushes a TIL entry to Notion
 func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir string) error {
 	if nc.client == nil {
@@ -93,6 +95,30 @@ func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir stri
 			DatabaseID: nc.dbID,
 		},
 		Properties: properties,
+	}
+
+	// Add message body as page content if available
+	if entry.MessageBody != "" {
+		children := []notionapi.Block{
+			&notionapi.ParagraphBlock{
+				BasicBlock: notionapi.BasicBlock{
+					Object: "block",
+					Type:   "paragraph",
+				},
+				Paragraph: notionapi.Paragraph{
+					RichText: []notionapi.RichText{
+						{
+							Type: "text",
+							Text: &notionapi.Text{
+								Content: entry.MessageBody,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		pageReq.Children = children
 	}
 
 	// Create the page

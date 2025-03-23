@@ -20,6 +20,7 @@ type Config struct {
 type Entry struct {
 	Date         time.Time
 	Message      string
+	MessageBody  string
 	Files        []string
 	IsCommitted  bool
 	NotionSynced bool

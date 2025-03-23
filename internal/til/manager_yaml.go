@@ -293,7 +293,7 @@ func (m *Manager) AmendLastYAMLEntry(message string) error {
 	return m.ClearStagedFiles()
 }
 
-// updateReadmeFromYAML updates the README.md file based on YAML entries
+// Update in internal/til/manager_yaml.go
 func (m *Manager) updateReadmeFromYAML(newEntry Entry) error {
 	readmePath := filepath.Join(m.Config.DataDir, "til", "README.md")
 
@@ -323,6 +323,13 @@ func (m *Manager) updateReadmeFromYAML(newEntry Entry) error {
 
 	for _, entry := range entries {
 		dateStr := entry.Date.Format("2006-01-02")
+
+		// Format the entry message, including a link to the body if available
+		entryMsg := entry.Message
+		if entry.MessageBody != "" {
+			entryMsg = fmt.Sprintf("[%s](til/files/%s_body.md)", entryMsg, dateStr)
+		}
+
 		filesStr := ""
 
 		if len(entry.Files) > 0 {
@@ -333,7 +340,7 @@ func (m *Manager) updateReadmeFromYAML(newEntry Entry) error {
 			filesStr = strings.Join(fileLinks, ", ")
 		}
 
-		entriesContent += fmt.Sprintf("| %s | %s | %s |\n", dateStr, entry.Message, filesStr)
+		entriesContent += fmt.Sprintf("| %s | %s | %s |\n", dateStr, entryMsg, filesStr)
 	}
 
 	// Read current README
@@ -349,7 +356,7 @@ func (m *Manager) updateReadmeFromYAML(newEntry Entry) error {
 	}
 
 	// Create new content
-	newContent := contentParts[0] + "## Entries" + entriesContent
+	newContent := contentParts[0] + entriesContent
 
 	// Write updated README
 	return os.WriteFile(readmePath, []byte(newContent), 0644)
@@ -410,4 +417,200 @@ func (m *Manager) MigrateToYAML() error {
 
 	// Rename the old file as backup
 	return os.Rename(oldTilFile, oldTilFile+".bak")
+}
+
+// Add to internal/til/manager_yaml.go
+
+// CommitYAMLEntryWithBody commits a new TIL entry with the staged files and a message body
+func (m *Manager) CommitYAMLEntryWithBody(message, messageBody string) error {
+	if !m.IsYAMLInitialized() {
+		return errors.New("TIL repository not initialized with YAML")
+	}
+
+	// Check if the message is empty
+	if strings.TrimSpace(message) == "" {
+		return errors.New("commit message cannot be empty")
+	}
+
+	// Get the staged files
+	stagedFiles, err := m.GetStagedFiles()
+	if err != nil {
+		return err
+	}
+
+	// Create the entry
+	entry := Entry{
+		Date:         time.Now(),
+		Message:      message,
+		MessageBody:  messageBody,
+		Files:        stagedFiles,
+		IsCommitted:  true,
+		NotionSynced: false,
+	}
+
+	// Add the entry to the YAML file
+	if err := m.AppendYAMLEntry(entry); err != nil {
+		return err
+	}
+
+	// If there's a message body, save it as a markdown file
+	if messageBody != "" {
+		if err := m.saveMessageBody(entry); err != nil {
+			return err
+		}
+	}
+
+	// Move the staged files to the files directory
+	if len(stagedFiles) > 0 {
+		dateStr := entry.Date.Format("2006-01-02")
+		if err := m.moveFilesToStorage(stagedFiles, dateStr); err != nil {
+			return err
+		}
+	}
+
+	// Update README.md if Git sync is enabled
+	if m.Config.SyncToGit {
+		if err := m.updateReadmeFromYAML(entry); err != nil {
+			fmt.Printf("Warning: Failed to update README.md: %v\n", err)
+			// Continue anyway
+		}
+	}
+
+	// Sync with Git if enabled
+	if m.Config.SyncToGit {
+		tilDir := filepath.Join(m.Config.DataDir, "til")
+		gitManager := NewGitManager(tilDir)
+
+		// Stage all changes
+		if err := gitManager.AddAll(); err != nil {
+			fmt.Printf("Warning: Failed to stage changes to Git: %v\n", err)
+			// Continue anyway
+		} else {
+			// Commit changes
+			if err := gitManager.Commit(message); err != nil {
+				fmt.Printf("Warning: Failed to commit changes to Git: %v\n", err)
+				// Continue anyway
+			} else {
+				// Push changes
+				if err := gitManager.Push(); err != nil {
+					fmt.Printf("Warning: Failed to push changes to Git: %v\n", err)
+					// Continue anyway
+				} else {
+					fmt.Println("Successfully pushed changes to Git")
+				}
+			}
+		}
+	}
+
+	// Clear the staged files
+	return m.ClearStagedFiles()
+}
+
+// AmendLastYAMLEntryWithBody amends the last entry with a new message and body
+func (m *Manager) AmendLastYAMLEntryWithBody(message, messageBody string) error {
+	if !m.IsYAMLInitialized() {
+		return errors.New("TIL repository not initialized with YAML")
+	}
+
+	// Check if the message is empty
+	if strings.TrimSpace(message) == "" {
+		return errors.New("commit message cannot be empty")
+	}
+
+	// Get the latest entry
+	entries, err := m.GetLatestYAMLEntries(1)
+	if err != nil {
+		return err
+	}
+
+	if len(entries) == 0 {
+		return errors.New("no entries found to amend")
+	}
+
+	lastEntry := entries[0]
+	lastEntry.Message = message
+	lastEntry.MessageBody = messageBody
+
+	// Get the staged files
+	stagedFiles, err := m.GetStagedFiles()
+	if err != nil {
+		return err
+	}
+
+	// Add newly staged files to the entry
+	lastEntry.Files = append(lastEntry.Files, stagedFiles...)
+
+	// Update the entry in the YAML storage
+	tilFile := filepath.Join(m.Config.DataDir, "til", "til.yml")
+	storage, err := LoadYAMLStorage(tilFile)
+	if err != nil {
+		return err
+	}
+
+	// Find the entry to amend
+	found := false
+	for i, e := range storage.Entries {
+		if e.Date.Format("2006-01-02") == lastEntry.Date.Format("2006-01-02") && e.Message == entries[0].Message {
+			storage.Entries[i].Message = lastEntry.Message
+			storage.Entries[i].MessageBody = lastEntry.MessageBody
+			storage.Entries[i].Files = lastEntry.Files
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return errors.New("entry not found")
+	}
+
+	// Save the updated storage
+	if err := SaveYAMLStorage(tilFile, storage); err != nil {
+		return err
+	}
+
+	// If there's a message body, save it as a markdown file
+	if messageBody != "" {
+		if err := m.saveMessageBody(lastEntry); err != nil {
+			return err
+		}
+	}
+
+	// Move the staged files to the files directory
+	if len(stagedFiles) > 0 {
+		dateStr := lastEntry.Date.Format("2006-01-02")
+		if err := m.moveFilesToStorage(stagedFiles, dateStr); err != nil {
+			return err
+		}
+	}
+
+	// Update README.md if Git sync is enabled
+	if m.Config.SyncToGit {
+		if err := m.updateReadmeFromYAML(lastEntry); err != nil {
+			fmt.Printf("Warning: Failed to update README.md: %v\n", err)
+		}
+	}
+
+	// Sync with Git if enabled
+	if m.Config.SyncToGit {
+		tilDir := filepath.Join(m.Config.DataDir, "til")
+		gitManager := NewGitManager(tilDir)
+
+		if err := gitManager.AddAll(); err != nil {
+			fmt.Printf("Warning: Failed to stage changes to Git: %v\n", err)
+		} else {
+			commitMsg := fmt.Sprintf("Amend: %s", message)
+			if err := gitManager.Commit(commitMsg); err != nil {
+				fmt.Printf("Warning: Failed to commit changes to Git: %v\n", err)
+			} else {
+				if err := gitManager.Push(); err != nil {
+					fmt.Printf("Warning: Failed to push changes to Git: %v\n", err)
+				} else {
+					fmt.Println("Successfully pushed amended changes to Git")
+				}
+			}
+		}
+	}
+
+	// Clear the staged files
+	return m.ClearStagedFiles()
 }

@@ -14,6 +14,7 @@ import (
 type YAMLEntry struct {
 	Date         time.Time `yaml:"date"`
 	Message      string    `yaml:"message"`
+	MessageBody  string    `yaml:"message_body"`
 	Files        []string  `yaml:"files,omitempty"`
 	IsCommitted  bool      `yaml:"is_committed"`
 	NotionSynced bool      `yaml:"notion_synced"`
@@ -79,6 +80,7 @@ func ConvertEntriesToYAML(entries []Entry) []YAMLEntry {
 		yamlEntries[i] = YAMLEntry{
 			Date:         entry.Date,
 			Message:      entry.Message,
+			MessageBody:  entry.MessageBody,
 			Files:        entry.Files,
 			IsCommitted:  entry.IsCommitted,
 			NotionSynced: entry.NotionSynced,
@@ -94,6 +96,7 @@ func ConvertYAMLToEntries(yamlEntries []YAMLEntry) []Entry {
 		entries[i] = Entry{
 			Date:         yamlEntry.Date,
 			Message:      yamlEntry.Message,
+			MessageBody:  yamlEntry.MessageBody,
 			Files:        yamlEntry.Files,
 			IsCommitted:  yamlEntry.IsCommitted,
 			NotionSynced: yamlEntry.NotionSynced,
