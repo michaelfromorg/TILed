@@ -24,24 +24,20 @@ var commitCmd = &cobra.Command{
 If files have been added, they will be included in the entry.
 Use --amend to amend the previous commit.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Get current working directory
 		wd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Load configuration
 		config, err := til.LoadConfig(wd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Create manager
 		manager := til.NewManager(config)
 
-		// Check if the repository is initialized
 		if !manager.IsInitialized() {
 			fmt.Fprintln(os.Stderr, "TIL repository not initialized. Run 'til init' first.")
 			os.Exit(1)

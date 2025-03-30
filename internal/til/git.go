@@ -16,7 +16,6 @@ type GitManager struct {
 
 // NewGitManager creates a new GitManager
 func NewGitManager(workDir string) *GitManager {
-	fmt.Printf("Creating GitManager with workDir: %s\n", workDir)
 	return &GitManager{
 		WorkDir: workDir,
 	}

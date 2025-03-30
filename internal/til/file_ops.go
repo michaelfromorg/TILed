@@ -11,31 +11,37 @@ import (
 )
 
 // AddFile adds a file to the staged files
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 func (m *Manager) AddFile(filePath string) error {
-	// Check if the TIL repository is initialized
 	if !m.IsInitialized() {
 		return errors.New("TIL repository not initialized")
 	}
 
-	// Check if the file exists
-	_, err := os.Stat(filePath)
+	// Assert the file exists
+	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return fmt.Errorf("file not found: %v", err)
 	}
 
-	// Get the staging directory
+	// Assert the file is actually a file
+	if fileInfo.IsDir() {
+		return fmt.Errorf("cannot add directory: %s", filePath)
+	}
+
+	// Assert the file is not ridiculosly large
+	if fileInfo.Size() > MAX_FILE_SIZE {
+		return fmt.Errorf("file too large: %s (%d bytes, max is %d bytes)",
+			filePath, fileInfo.Size(), MAX_FILE_SIZE)
+	}
+
 	stagingDir := filepath.Join(m.Config.DataDir, ".til", "staging")
 	if err := os.MkdirAll(stagingDir, 0755); err != nil {
 		return err
 	}
 
-	// Get the file name
 	fileName := filepath.Base(filePath)
-
-	// Create the target file
 	targetPath := filepath.Join(stagingDir, fileName)
 
-	// Copy the file
 	return copyFile(filePath, targetPath)
 }
 

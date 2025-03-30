@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jomei/notionapi"
 )
@@ -25,15 +26,13 @@ func NewNotionClient(apiKey string, dbID string) *NotionClient {
 	}
 }
 
-// Update in internal/til/notion.go
-
 // PushEntry pushes a TIL entry to Notion
 func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir string) error {
 	if nc.client == nil {
 		return errors.New("notion client not initialized")
 	}
 
-	// Create a new page with the TIL entry
+	// Create properties for the new page
 	properties := notionapi.Properties{
 		"TIL": notionapi.TitleProperty{
 			Title: []notionapi.RichText{
@@ -89,40 +88,61 @@ func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir stri
 		}
 	}
 
-	// Create page request
-	pageReq := notionapi.PageCreateRequest{
-		Parent: notionapi.Parent{
-			DatabaseID: nc.dbID,
-		},
-		Properties: properties,
-	}
-
-	// Add message body as page content if available
+	// Prepare children blocks for the page content if message body is available
+	var children []notionapi.Block
 	if entry.MessageBody != "" {
-		children := []notionapi.Block{
-			&notionapi.ParagraphBlock{
+		// Split the message body into paragraphs
+		paragraphs := strings.Split(entry.MessageBody, "\n\n")
+
+		for _, paragraph := range paragraphs {
+			paragraph = strings.TrimSpace(paragraph)
+			if paragraph == "" {
+				continue
+			}
+
+			// Create a paragraph block for each non-empty paragraph
+			children = append(children, &notionapi.ParagraphBlock{
 				BasicBlock: notionapi.BasicBlock{
 					Object: "block",
-					Type:   "paragraph",
+					Type:   notionapi.BlockTypeParagraph,
 				},
 				Paragraph: notionapi.Paragraph{
 					RichText: []notionapi.RichText{
 						{
 							Type: "text",
 							Text: &notionapi.Text{
-								Content: entry.MessageBody,
+								Content: paragraph,
 							},
 						},
 					},
 				},
-			},
+			})
 		}
+	}
 
+	// Create the page request
+	pageReq := &notionapi.PageCreateRequest{
+		Parent: notionapi.Parent{
+			Type:       notionapi.ParentTypeDatabaseID,
+			DatabaseID: nc.dbID,
+		},
+		Properties: properties,
+	}
+
+	// Only add children if we have content
+	if len(children) > 0 {
 		pageReq.Children = children
 	}
 
+	// Debug output - uncomment if needed
+	// fmt.Printf("Creating page with %d content blocks\n", len(children))
+
 	// Create the page
-	_, err := nc.client.Page.Create(ctx, &pageReq)
+	ok, err := nc.client.Page.Create(ctx, pageReq)
+
+	fmt.Println("ok", ok)
+	fmt.Println("err", err)
+
 	return err
 }
 
