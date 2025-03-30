@@ -2,6 +2,7 @@ package til
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,4 +184,26 @@ func (m *Manager) UpdateEntryNotionSyncStatus(entry Entry) error {
 	}
 
 	return os.WriteFile(tilFile, []byte(strings.Join(updatedLines, "\n")), 0644)
+}
+
+func (m *Manager) LoadEntryMessageBodies(entries []Entry) []Entry {
+	for i, entry := range entries {
+		// Skip entries that don't have a body marker
+		if entry.MessageBody == "" && entry.MessageBody != "has_body" {
+			continue
+		}
+
+		dateStr := entry.Date.Format("2006-01-02")
+		bodyFilePath := filepath.Join(m.Config.DataDir, "til", "files", fmt.Sprintf("%s_body.md", dateStr))
+
+		// Check if the body file exists
+		if _, err := os.Stat(bodyFilePath); err == nil {
+			// File exists, read the body content
+			bodyContent, err := os.ReadFile(bodyFilePath)
+			if err == nil {
+				entries[i].MessageBody = string(bodyContent)
+			}
+		}
+	}
+	return entries
 }

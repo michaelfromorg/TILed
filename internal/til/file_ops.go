@@ -250,13 +250,12 @@ func (m *Manager) GetLatestEntries(limit int) ([]Entry, error) {
 	return entries, nil
 }
 
-// Update in internal/til/file_ops.go
 func parseEntries(content string) ([]Entry, error) {
 	lines := strings.Split(content, "\n")
 	entries := []Entry{}
 
 	var currentEntry *Entry
-	var readMoreLine string // Track if we found a "Read more" line
+	// var readMoreLine string // Track if we found a "Read more" line
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -300,8 +299,8 @@ func parseEntries(content string) ([]Entry, error) {
 
 			// Check for "Read more" link for body content
 			if strings.HasPrefix(line, "[Read more]") && strings.Contains(line, "_body.md)") {
-				readMoreLine = line
-				// We'll try to load the body content if needed
+				// readMoreLine = line
+				currentEntry.MessageBody = "has_body" // Mark that this entry has a body file
 				continue
 			}
 
@@ -329,20 +328,6 @@ func parseEntries(content string) ([]Entry, error) {
 	// Reverse the entries so latest is first
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
 		entries[i], entries[j] = entries[j], entries[i]
-	}
-
-	// Load message bodies for entries that have a "Read more" link
-	if readMoreLine != "" {
-		for i, entry := range entries {
-			bodyFilePath := filepath.Join("til", "files", fmt.Sprintf("%s_body.md", entry.Date.Format("2006-01-02")))
-			if _, err := os.Stat(bodyFilePath); err == nil {
-				// File exists, read the body content
-				bodyContent, err := os.ReadFile(bodyFilePath)
-				if err == nil {
-					entries[i].MessageBody = string(bodyContent)
-				}
-			}
-		}
 	}
 
 	return entries, nil
@@ -681,6 +666,10 @@ func (m *Manager) saveMessageBody(entry Entry) error {
 
 	dateStr := entry.Date.Format("2006-01-02")
 	filesDir := filepath.Join(m.Config.DataDir, "til", "files")
+	if err := os.MkdirAll(filesDir, 0755); err != nil {
+		return err
+	}
+
 	bodyFilename := fmt.Sprintf("%s_body.md", dateStr)
 	bodyPath := filepath.Join(filesDir, bodyFilename)
 

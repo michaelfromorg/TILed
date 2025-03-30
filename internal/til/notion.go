@@ -88,11 +88,13 @@ func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir stri
 		}
 	}
 
-	// Prepare children blocks for the page content if message body is available
+	// Add this code in your PushEntry method where you create the page request
 	var children []notionapi.Block
+	fmt.Println("entry.MessageBody", entry.MessageBody)
 	if entry.MessageBody != "" {
 		// Split the message body into paragraphs
 		paragraphs := strings.Split(entry.MessageBody, "\n\n")
+		fmt.Println("paragraphs", paragraphs)
 
 		for _, paragraph := range paragraphs {
 			paragraph = strings.TrimSpace(paragraph)
@@ -135,7 +137,7 @@ func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir stri
 	}
 
 	// Debug output - uncomment if needed
-	// fmt.Printf("Creating page with %d content blocks\n", len(children))
+	fmt.Printf("Creating page with %d content blocks\n", len(children))
 
 	// Create the page
 	ok, err := nc.client.Page.Create(ctx, pageReq)

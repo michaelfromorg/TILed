@@ -69,6 +69,18 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("Date:    %s%s\n", latestDate, todayStr)
 			fmt.Printf("Message: %s\n", latestEntry.Message)
 
+			// Add MessageBody display
+			if latestEntry.MessageBody != "" {
+				// Print the first line of the message body, or a truncated version if it's long
+				messageBodyPreview := latestEntry.MessageBody
+				if len(messageBodyPreview) > 50 {
+					messageBodyPreview = messageBodyPreview[:47] + "..."
+				}
+				fmt.Printf("Body:    %s\n", messageBodyPreview)
+			} else {
+				fmt.Println("Body:    None")
+			}
+
 			if len(latestEntry.Files) > 0 {
 				fmt.Printf("Files:   %s\n", strings.Join(latestEntry.Files, ", "))
 			} else {

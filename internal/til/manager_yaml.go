@@ -59,6 +59,7 @@ func (m *Manager) GetLatestYAMLEntries(limit int) ([]Entry, error) {
 	}
 
 	entries := ConvertYAMLToEntries(storage.Entries)
+	entries = m.loadMessageBodies(entries)
 
 	// Sort entries by date (newest first)
 	sort.Slice(entries, func(i, j int) bool {
@@ -613,4 +614,22 @@ func (m *Manager) AmendLastYAMLEntryWithBody(message, messageBody string) error 
 
 	// Clear the staged files
 	return m.ClearStagedFiles()
+}
+
+func (m *Manager) loadMessageBodies(entries []Entry) []Entry {
+	for i, entry := range entries {
+		// Only try to load a message body if the entry might have one
+		dateStr := entry.Date.Format("2006-01-02")
+		bodyFilePath := filepath.Join(m.Config.DataDir, "til", "files", fmt.Sprintf("%s_body.md", dateStr))
+
+		// Check if the body file exists
+		if _, err := os.Stat(bodyFilePath); err == nil {
+			// File exists, read the body content
+			bodyContent, err := os.ReadFile(bodyFilePath)
+			if err == nil {
+				entries[i].MessageBody = string(bodyContent)
+			}
+		}
+	}
+	return entries
 }
