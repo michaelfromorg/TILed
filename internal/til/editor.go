@@ -2,7 +2,6 @@
 package til
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -65,22 +64,12 @@ func OpenEditor(initialContent string) (string, error) {
 		return "", err
 	}
 
-	// Add debug output
-	fmt.Println("Debug - Content from editor:")
-	fmt.Println("---START OF CONTENT---")
-	fmt.Println(string(content))
-	fmt.Println("---END OF CONTENT---")
-
 	return string(content), nil
 }
 
 // SplitCommitMessage splits the commit message into title and body
 func SplitCommitMessage(message string) (string, string) {
-	fmt.Println("message", message)
-
 	lines := strings.Split(message, "\n")
-	fmt.Println("Debug - SplitCommitMessage - lines:")
-	fmt.Println(lines)
 	if len(lines) == 0 {
 		return "", ""
 	}
@@ -104,6 +93,5 @@ func SplitCommitMessage(message string) (string, string) {
 	}
 
 	body := strings.TrimSpace(strings.Join(lines[1:], "\n"))
-	fmt.Println("body", body)
 	return title, body
 }

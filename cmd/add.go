@@ -49,11 +49,7 @@ The files will be staged for the next commit.`,
 		var entries []til.Entry
 		var getEntriesErr error
 
-		if manager.UseYAML {
-			entries, getEntriesErr = manager.GetLatestYAMLEntries(1)
-		} else {
-			entries, getEntriesErr = manager.GetLatestEntries(1)
-		}
+		entries, getEntriesErr = manager.GetLatestEntries(1)
 
 		// Show user a reminder about committing only if there are no entries
 		if getEntriesErr == nil && len(entries) == 0 {

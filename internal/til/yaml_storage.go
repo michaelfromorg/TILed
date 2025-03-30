@@ -93,7 +93,6 @@ func ConvertEntriesToYAML(entries []Entry) []YAMLEntry {
 func ConvertYAMLToEntries(yamlEntries []YAMLEntry) []Entry {
 	entries := make([]Entry, len(yamlEntries))
 	for i, yamlEntry := range yamlEntries {
-		fmt.Println("entry", i, yamlEntry.Message, yamlEntry.MessageBody)
 		entries[i] = Entry{
 			Date:         yamlEntry.Date,
 			Message:      yamlEntry.Message,

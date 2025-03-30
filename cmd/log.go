@@ -50,17 +50,10 @@ By default, shows the last 10 entries. Use -n to specify the number of entries t
 		}
 
 		// Get entries
-		useYAML := manager.IsYAMLInitialized()
-
-		// Get entries
 		var entries []til.Entry
 		var getErr error
 
-		if useYAML {
-			entries, getErr = manager.GetLatestYAMLEntries(number)
-		} else {
-			entries, getErr = manager.GetLatestEntries(number)
-		}
+		entries, getErr = manager.GetLatestEntries(number)
 
 		if getErr != nil {
 			fmt.Fprintf(os.Stderr, "Error getting entries: %v\n", getErr)

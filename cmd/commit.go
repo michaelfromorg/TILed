@@ -86,36 +86,22 @@ Use --amend to amend the previous commit.`,
 			message, messageBody = til.SplitCommitMessage(content)
 		}
 
-		useYAML := manager.IsYAMLInitialized()
-
 		// Check if amending
 		if amend {
 			// If amending without message, open editor with current message
 			if message == "" {
 				var currentEntry til.Entry
-				if useYAML {
-					entries, err := manager.GetLatestYAMLEntries(1)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "Error getting latest entry: %v\n", err)
-						os.Exit(1)
-					}
-					if len(entries) == 0 {
-						fmt.Fprintln(os.Stderr, "No entries found to amend.")
-						os.Exit(1)
-					}
-					currentEntry = entries[0]
-				} else {
-					entries, err := manager.GetLatestEntries(1)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "Error getting latest entry: %v\n", err)
-						os.Exit(1)
-					}
-					if len(entries) == 0 {
-						fmt.Fprintln(os.Stderr, "No entries found to amend.")
-						os.Exit(1)
-					}
-					currentEntry = entries[0]
+
+				entries, err := manager.GetLatestEntries(1)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error getting latest entry: %v\n", err)
+					os.Exit(1)
 				}
+				if len(entries) == 0 {
+					fmt.Fprintln(os.Stderr, "No entries found to amend.")
+					os.Exit(1)
+				}
+				currentEntry = entries[0]
 
 				// Prepare initial content with current message
 				initialContent := currentEntry.Message
@@ -140,12 +126,7 @@ Use --amend to amend the previous commit.`,
 				message, messageBody = til.SplitCommitMessage(content)
 			}
 
-			var err error
-			if useYAML {
-				err = manager.AmendLastYAMLEntryWithBody(message, messageBody)
-			} else {
-				err = manager.AmendLastEntryWithBody(message, messageBody)
-			}
+			err := manager.AmendLastEntryWithBody(message, messageBody)
 
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error amending commit: %v\n", err)
@@ -186,12 +167,7 @@ Use --amend to amend the previous commit.`,
 			}
 		}
 
-		var commitErr error
-		if useYAML {
-			commitErr = manager.CommitYAMLEntryWithBody(message, messageBody)
-		} else {
-			commitErr = manager.CommitEntryWithBody(message, messageBody)
-		}
+		commitErr := manager.CommitEntryWithBody(message, messageBody)
 
 		if commitErr != nil {
 			fmt.Fprintf(os.Stderr, "Error committing entry: %v\n", commitErr)

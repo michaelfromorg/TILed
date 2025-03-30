@@ -47,12 +47,7 @@ var statusCmd = &cobra.Command{
 		fmt.Println("===========")
 
 		// Display latest entry
-		var entries []til.Entry
-		if manager.UseYAML {
-			entries, err = manager.GetLatestYAMLEntries(1)
-		} else {
-			entries, err = manager.GetLatestEntries(1)
-		}
+		entries, err := manager.GetLatestEntries(1)
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting latest entry: %v\n", err)
@@ -144,12 +139,7 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("DB ID:   %s\n", maskString(config.NotionDBID))
 
 			// Count synced vs unsynced entries
-			var allEntries []til.Entry
-			if manager.UseYAML {
-				allEntries, err = manager.GetLatestYAMLEntries(0)
-			} else {
-				allEntries, err = manager.GetLatestEntries(0)
-			}
+			allEntries, err := manager.GetLatestEntries(0)
 
 			if err == nil {
 				synced := 0

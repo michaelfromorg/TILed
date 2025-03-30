@@ -59,17 +59,7 @@ You can also sync your TIL entries with a Notion database and/or a Git repositor
 			return
 		}
 
-		// Check if YAML flag is set
-		useYAML, _ := cmd.Flags().GetBool("yaml")
-
-		// Initialize the repository
-		var initErr error
-		if useYAML {
-			initErr = manager.InitYAML()
-		} else {
-			initErr = manager.Init()
-		}
-
+		initErr := manager.Init()
 		if initErr != nil {
 			fmt.Fprintf(os.Stderr, "Error initializing TIL repository: %v\n", initErr)
 			os.Exit(1)
