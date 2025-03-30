@@ -17,17 +17,17 @@ cd ..
 
 ### ADD, COMMIT, LOG ###
 ./tilcli add ./test_file.txt
-./tilcli commit -m "First entry with YAML storage"
+./tilcli commit -m "First entry storage"
 ./tilcli log
 
 ### AMEND, STATUS ###
 ./tilcli add ./test_file2.txt
 ./til status
-./tilcli commit --amend -m "First entry amended with YAML storage"
+./tilcli commit --amend -m "First entry amended storage"
 
 ### COMMIT (x2), PUSH ###
 ./tilcli add ./test_file3.txt
-./tilcli commit -m "Second entry with YAML storage"
+./tilcli commit -m "Second entry storage"
 ./tilcli push --git
 
 cat ./til/til.yml

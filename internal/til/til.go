@@ -73,7 +73,7 @@ func (m *Manager) Init() error {
 // Grabs all entries and validates what is synced to Notion (or not)
 func (m *Manager) UpdateEntryNotionSyncStatus(entry Entry) error {
 	if !m.IsInitialized() {
-		return errors.New("TIL repository not initialized with YAML")
+		return errors.New("TIL repository not initialized")
 	}
 
 	tilFile := filepath.Join(m.Config.DataDir, "til", "til.yml")

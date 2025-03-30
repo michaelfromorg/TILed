@@ -113,7 +113,7 @@ func (m *Manager) ClearStagedFiles() error {
 // CommitEntry commits a new TIL entry with the staged files
 func (m *Manager) CommitEntry(message string) error {
 	if !m.IsInitialized() {
-		return errors.New("TIL repository not initialized with YAML")
+		return errors.New("TIL repository not initialized")
 	}
 
 	// Get the staged files
@@ -209,7 +209,7 @@ func (m *Manager) moveFilesToStorage(files []string, dateStr string) error {
 // GetLatestEntries retrieves the latest TIL entries from the log
 func (m *Manager) GetLatestEntries(limit int) ([]Entry, error) {
 	if !m.IsInitialized() {
-		return nil, errors.New("TIL repository not initialized with YAML")
+		return nil, errors.New("TIL repository not initialized")
 	}
 
 	tilFile := filepath.Join(m.Config.DataDir, "til", "til.yml")
@@ -318,7 +318,7 @@ func parseEntries(content string) ([]Entry, error) {
 
 func (m *Manager) AmendLastEntry(message string) error {
 	if !m.IsInitialized() {
-		return errors.New("TIL repository not initialized with YAML")
+		return errors.New("TIL repository not initialized")
 	}
 
 	// Get the latest entry
@@ -408,50 +408,6 @@ func (m *Manager) AmendLastEntry(message string) error {
 
 	// Clear the staged files
 	return m.ClearStagedFiles()
-}
-
-func (m *Manager) regenerateLog(updatedEntry Entry) error {
-	tilFile := filepath.Join(m.Config.DataDir, "til", "til.md")
-
-	content, err := os.ReadFile(tilFile)
-	if err != nil {
-		return err
-	}
-
-	entries, err := parseEntries(string(content))
-	if err != nil {
-		return err
-	}
-
-	found := false
-	for i, entry := range entries {
-		if entry.Date.Format("2006-01-02") == updatedEntry.Date.Format("2006-01-02") {
-			entries[i] = updatedEntry
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return errors.New("entry not found")
-	}
-
-	newContent := "# Today I Learned\n\n| Date | Entry | Files |\n| --- | --- | --- |\n"
-
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		dateStr := entry.Date.Format("2006-01-02")
-		newContent += fmt.Sprintf("\n## %s\n\n%s\n", dateStr, entry.Message)
-
-		if len(entry.Files) > 0 {
-			newContent += "\nFiles:\n"
-			for _, file := range entry.Files {
-				newContent += fmt.Sprintf("- [%s](files/%s_%s)\n", file, dateStr, file)
-			}
-		}
-	}
-
-	return os.WriteFile(tilFile, []byte(newContent), 0644)
 }
 
 // Update in internal/til/file_ops.go
@@ -562,8 +518,6 @@ func copyFile(src, dst string) error {
 	_, err = io.Copy(destFile, sourceFile)
 	return err
 }
-
-// Add these methods to internal/til/file_ops.go
 
 // CommitEntryWithBody commits a new TIL entry with the staged files and a message body
 func (m *Manager) CommitEntryWithBody(message, messageBody string) error {
@@ -679,7 +633,7 @@ func (m *Manager) saveMessageBody(entry Entry) error {
 // AmendLastEntryWithBody amends the last entry with a new message and body
 func (m *Manager) AmendLastEntryWithBody(message, messageBody string) error {
 	if !m.IsInitialized() {
-		return errors.New("TIL repository not initialized with YAML")
+		return errors.New("TIL repository not initialized")
 	}
 
 	// Check if the message is empty
@@ -787,33 +741,39 @@ func (m *Manager) AmendLastEntryWithBody(message, messageBody string) error {
 
 // Update appendEntryToLog to include the message body
 func (m *Manager) appendEntryToLog(entry Entry) error {
-	tilFile := filepath.Join(m.Config.DataDir, "til", "til.md")
+	if !m.IsInitialized() {
+		return errors.New("TIL repository not initialized with YAML")
+	}
 
-	// Open the file in append mode
-	f, err := os.OpenFile(tilFile, os.O_APPEND|os.O_WRONLY, 0644)
+	// Load the current YAML file
+	tilFile := filepath.Join(m.Config.DataDir, "til", "til.yml")
+	storage, err := LoadYAMLStorage(tilFile)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	// Format the entry
-	dateStr := entry.Date.Format("2006-01-02")
-	entryText := fmt.Sprintf("\n## %s\n\n%s\n", dateStr, entry.Message)
-
-	// Add message body reference if any
-	if entry.MessageBody != "" {
-		entryText += fmt.Sprintf("\n[Read more](files/%s_body.md)\n", dateStr)
+	// Convert the Entry to YAMLEntry and append it
+	yamlEntry := YAMLEntry{
+		Date:         entry.Date,
+		Message:      entry.Message,
+		MessageBody:  entry.MessageBody,
+		Files:        entry.Files,
+		IsCommitted:  entry.IsCommitted,
+		NotionSynced: entry.NotionSynced,
 	}
 
-	// Add file references if any
-	if len(entry.Files) > 0 {
-		entryText += "\nFiles:\n"
-		for _, file := range entry.Files {
-			entryText += fmt.Sprintf("- [%s](files/%s_%s)\n", file, dateStr, file)
+	// Add to the entries list
+	storage.Entries = append(storage.Entries, yamlEntry)
+
+	// Save the message body to a file if it exists
+	if entry.MessageBody != "" {
+		dateStr := entry.Date.Format("2006-01-02")
+		bodyFilePath := filepath.Join(m.Config.DataDir, "til", "files", fmt.Sprintf("%s_body.md", dateStr))
+		if err := os.WriteFile(bodyFilePath, []byte(entry.MessageBody), 0644); err != nil {
+			return err
 		}
 	}
 
-	// Write to the file
-	_, err = f.WriteString(entryText)
-	return err
+	// Save the updated YAML file
+	return SaveYAMLStorage(tilFile, storage)
 }

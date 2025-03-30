@@ -14,7 +14,7 @@ import (
 // AppendYAMLEntry appends a new entry to the YAML storage
 func (m *Manager) AppendYAMLEntry(entry Entry) error {
 	if !m.IsInitialized() {
-		return errors.New("TIL repository not initialized with YAML")
+		return errors.New("TIL repository not initialized")
 	}
 
 	tilFile := filepath.Join(m.Config.DataDir, "til", "til.yml")
@@ -167,7 +167,7 @@ func (m *Manager) MigrateToYAML() error {
 // CommitYAMLEntryWithBody commits a new TIL entry with the staged files and a message body
 func (m *Manager) CommitYAMLEntryWithBody(message, messageBody string) error {
 	if !m.IsInitialized() {
-		return errors.New("TIL repository not initialized with YAML")
+		return errors.New("TIL repository not initialized")
 	}
 
 	// Check if the message is empty

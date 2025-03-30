@@ -11,7 +11,6 @@ import (
 )
 
 func init() {
-	initCmd.Flags().Bool("yaml", true, "Initialize with YAML storage (default: true)")
 	rootCmd.AddCommand(initCmd)
 }
 
