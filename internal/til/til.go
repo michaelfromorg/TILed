@@ -1,6 +1,8 @@
 package til
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +26,7 @@ type Entry struct {
 	Files        []string
 	IsCommitted  bool
 	NotionSynced bool
+	CommitID     string
 }
 
 type Manager struct {
@@ -120,4 +123,16 @@ func (m *Manager) LoadEntryMessageBodies(entries []Entry) []Entry {
 		}
 	}
 	return entries
+}
+
+// GenerateCommitID creates a unique ID for a commit based on its message and timestamp
+func GenerateCommitID(message string, timestamp time.Time) string {
+	// Combine message and timestamp
+	data := fmt.Sprintf("%s-%d", message, timestamp.UnixNano())
+
+	// Generate SHA-256 hash
+	hash := sha256.Sum256([]byte(data))
+
+	// Convert to hex string and take first 8 characters (like Git's short hash)
+	return hex.EncodeToString(hash[:])[:8]
 }

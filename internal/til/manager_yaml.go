@@ -70,7 +70,7 @@ func (m *Manager) updateReadmeFromYAML(newEntry Entry) error {
 		// Format the entry message, including a link to the body if available
 		entryMsg := entry.Message
 		if entry.MessageBody != "" {
-			entryMsg = fmt.Sprintf("[%s](til/files/%s_body.md)", entryMsg, dateStr)
+			entryMsg = fmt.Sprintf("[%s](til/files/%s_body.md)", entryMsg, entry.CommitID)
 		}
 
 		filesStr := ""
@@ -251,9 +251,12 @@ func (m *Manager) CommitYAMLEntryWithBody(message, messageBody string) error {
 
 func (m *Manager) loadMessageBodies(entries []Entry) []Entry {
 	for i, entry := range entries {
-		// Only try to load a message body if the entry might have one
-		dateStr := entry.Date.Format("2006-01-02")
-		bodyFilePath := filepath.Join(m.Config.DataDir, "til", "files", fmt.Sprintf("%s_body.md", dateStr))
+		// Skip entries without a commit ID
+		if entry.CommitID == "" {
+			continue
+		}
+
+		bodyFilePath := filepath.Join(m.Config.DataDir, "til", "files", fmt.Sprintf("body_%s.md", entry.CommitID))
 
 		// Check if the body file exists
 		if _, err := os.Stat(bodyFilePath); err == nil {

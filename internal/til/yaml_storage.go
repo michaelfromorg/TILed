@@ -18,6 +18,7 @@ type YAMLEntry struct {
 	Files        []string  `yaml:"files,omitempty"`
 	IsCommitted  bool      `yaml:"is_committed"`
 	NotionSynced bool      `yaml:"notion_synced"`
+	CommitID     string    `yaml:"commit_id,omitempty"`
 }
 
 // YAMLStorage represents the full YAML storage file
@@ -77,6 +78,12 @@ func SaveYAMLStorage(filePath string, storage *YAMLStorage) error {
 func ConvertEntriesToYAML(entries []Entry) []YAMLEntry {
 	yamlEntries := make([]YAMLEntry, len(entries))
 	for i, entry := range entries {
+		// Generate commit ID if it doesn't exist
+		commitID := entry.CommitID
+		if commitID == "" {
+			commitID = GenerateCommitID(entry.Message, entry.Date)
+		}
+
 		yamlEntries[i] = YAMLEntry{
 			Date:         entry.Date,
 			Message:      entry.Message,
@@ -84,6 +91,7 @@ func ConvertEntriesToYAML(entries []Entry) []YAMLEntry {
 			Files:        entry.Files,
 			IsCommitted:  entry.IsCommitted,
 			NotionSynced: entry.NotionSynced,
+			CommitID:     commitID,
 		}
 	}
 	return yamlEntries
@@ -100,6 +108,7 @@ func ConvertYAMLToEntries(yamlEntries []YAMLEntry) []Entry {
 			Files:        yamlEntry.Files,
 			IsCommitted:  yamlEntry.IsCommitted,
 			NotionSynced: yamlEntry.NotionSynced,
+			CommitID:     yamlEntry.CommitID,
 		}
 	}
 	return entries

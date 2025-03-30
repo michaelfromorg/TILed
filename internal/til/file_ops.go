@@ -183,7 +183,7 @@ func (m *Manager) CommitEntry(message string) error {
 }
 
 // moveFilesToStorage moves the staged files to the storage directory
-func (m *Manager) moveFilesToStorage(files []string, dateStr string) error {
+func (m *Manager) moveFilesToStorage(files []string, commitId string) error {
 	// Get the staging directory
 	stagingDir := filepath.Join(m.Config.DataDir, ".til", "staging")
 
@@ -196,7 +196,7 @@ func (m *Manager) moveFilesToStorage(files []string, dateStr string) error {
 	// Move each file
 	for _, file := range files {
 		sourcePath := filepath.Join(stagingDir, file)
-		targetPath := filepath.Join(filesDir, fmt.Sprintf("%s_%s", dateStr, file))
+		targetPath := filepath.Join(filesDir, fmt.Sprintf("%s_%s", commitId, file))
 
 		if err := copyFile(sourcePath, targetPath); err != nil {
 			return err
@@ -531,9 +531,11 @@ func (m *Manager) CommitEntryWithBody(message, messageBody string) error {
 		return errors.New("commit message cannot be empty")
 	}
 
-	// Get the current date
+	// Get the current time
 	now := time.Now()
-	dateStr := now.Format("2006-01-02")
+
+	// Generate commit ID
+	commitID := GenerateCommitID(message, now)
 
 	// Get the staged files
 	stagedFiles, err := m.GetStagedFiles()
@@ -548,6 +550,7 @@ func (m *Manager) CommitEntryWithBody(message, messageBody string) error {
 		MessageBody: messageBody,
 		Files:       stagedFiles,
 		IsCommitted: true,
+		CommitID:    commitID,
 	}
 
 	// Add the entry to the TIL file
@@ -564,7 +567,7 @@ func (m *Manager) CommitEntryWithBody(message, messageBody string) error {
 
 	// Move the staged files to the files directory
 	if len(stagedFiles) > 0 {
-		if err := m.moveFilesToStorage(stagedFiles, dateStr); err != nil {
+		if err := m.moveFilesToStorage(stagedFiles, commitID); err != nil {
 			return err
 		}
 	}
@@ -617,13 +620,18 @@ func (m *Manager) saveMessageBody(entry Entry) error {
 		return nil
 	}
 
-	dateStr := entry.Date.Format("2006-01-02")
+	// Ensure we have a commit ID
+	if entry.CommitID == "" {
+		entry.CommitID = GenerateCommitID(entry.Message, entry.Date)
+	}
+
 	filesDir := filepath.Join(m.Config.DataDir, "til", "files")
 	if err := os.MkdirAll(filesDir, 0755); err != nil {
 		return err
 	}
 
-	bodyFilename := fmt.Sprintf("%s_body.md", dateStr)
+	// Use commit ID in the filename
+	bodyFilename := fmt.Sprintf("body_%s.md", entry.CommitID)
 	bodyPath := filepath.Join(filesDir, bodyFilename)
 
 	// Create the file
@@ -655,6 +663,10 @@ func (m *Manager) AmendLastEntryWithBody(message, messageBody string) error {
 	lastEntry.Message = message
 	lastEntry.MessageBody = messageBody
 
+	if lastEntry.CommitID == "" {
+		lastEntry.CommitID = GenerateCommitID(message, lastEntry.Date)
+	}
+
 	// Get the staged files
 	stagedFiles, err := m.GetStagedFiles()
 	if err != nil {
@@ -678,6 +690,7 @@ func (m *Manager) AmendLastEntryWithBody(message, messageBody string) error {
 			storage.Entries[i].Message = lastEntry.Message
 			storage.Entries[i].MessageBody = lastEntry.MessageBody
 			storage.Entries[i].Files = lastEntry.Files
+			storage.Entries[i].CommitID = lastEntry.CommitID
 			found = true
 			break
 		}
@@ -739,7 +752,6 @@ func (m *Manager) AmendLastEntryWithBody(message, messageBody string) error {
 	return m.ClearStagedFiles()
 }
 
-// Update appendEntryToLog to include the message body
 func (m *Manager) appendEntryToLog(entry Entry) error {
 	if !m.IsInitialized() {
 		return errors.New("TIL repository not initialized with YAML")
@@ -760,19 +772,11 @@ func (m *Manager) appendEntryToLog(entry Entry) error {
 		Files:        entry.Files,
 		IsCommitted:  entry.IsCommitted,
 		NotionSynced: entry.NotionSynced,
+		CommitID:     entry.CommitID, // Include commit ID
 	}
 
 	// Add to the entries list
 	storage.Entries = append(storage.Entries, yamlEntry)
-
-	// Save the message body to a file if it exists
-	if entry.MessageBody != "" {
-		dateStr := entry.Date.Format("2006-01-02")
-		bodyFilePath := filepath.Join(m.Config.DataDir, "til", "files", fmt.Sprintf("%s_body.md", dateStr))
-		if err := os.WriteFile(bodyFilePath, []byte(entry.MessageBody), 0644); err != nil {
-			return err
-		}
-	}
 
 	// Save the updated YAML file
 	return SaveYAMLStorage(tilFile, storage)
