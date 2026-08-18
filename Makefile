@@ -1,38 +1,50 @@
-.PHONY: build clean test test-coverage install run-init run-add run-commit run-log run-push lint help deps
+.PHONY: all build check clean deps fmt fmt-check help install lint run-add run-commit run-init run-log run-push test test-coverage test-race test-verbose vet
 
-BINARY_NAME=tilcli
-COVERAGE_FILE=coverage.out
-GO_FILES=$(shell find . -name "*.go" -not -path "./vendor/*")
+BINARY_NAME := til
+COVERAGE_FILE := coverage.out
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X github.com/michaelfromorg/tiled/cmd.Version=$(VERSION)
 
 all: build
 
 help:
 	@echo "Available commands:"
-	@echo "  make build          - Build the TIL binary"
-	@echo "  make deps           - Download dependencies"
+	@echo "  make build          - Build the til binary"
+	@echo "  make check          - Run formatting, vet, unit, integration, and race checks"
 	@echo "  make clean          - Remove build artifacts"
+	@echo "  make deps           - Download dependencies"
+	@echo "  make fmt            - Format Go source files"
+	@echo "  make install        - Install til to GOPATH/bin"
 	@echo "  make test           - Run all tests"
-	@echo "  make test-verbose   - Run all tests with verbose output"
-	@echo "  make test-coverage  - Run tests with coverage report"
-	@echo "  make install        - Install TIL to GOPATH/bin"
-	@echo "  make lint           - Run the linter"
-	@echo "  make run-init       - Run 'til init'"
-	@echo "  make run-add FILE=x - Run 'til add FILE'"
-	@echo "  make run-commit     - Run 'til commit -m \"message\"'"
-	@echo "  make run-log        - Run 'til log'"
-	@echo "  make run-push       - Run 'til push'"
+	@echo "  make test-coverage  - Write coverage.out and print a coverage summary"
+	@echo "  make test-race      - Run all tests with the race detector"
+	@echo "  make vet            - Run go vet"
 
 deps:
-	go mod tidy
 	go mod download
 
-build: deps
-	go build -o $(BINARY_NAME) -v
+build:
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/til
 
 clean:
 	go clean
-	rm -f $(BINARY_NAME)
-	rm -f $(COVERAGE_FILE)
+	rm -f $(BINARY_NAME) $(COVERAGE_FILE)
+
+fmt:
+	gofmt -w ./cmd ./internal ./test
+
+fmt-check:
+	@files="$$(gofmt -l ./cmd ./internal ./test)"; \
+	if [ -n "$$files" ]; then \
+		echo "The following files need gofmt:"; \
+		echo "$$files"; \
+		exit 1; \
+	fi
+
+vet:
+	go vet ./...
+
+lint: fmt-check vet
 
 test:
 	go test ./...
@@ -40,41 +52,33 @@ test:
 test-verbose:
 	go test -v ./...
 
+test-race:
+	go test -race ./...
+
 test-coverage:
 	go test -coverprofile=$(COVERAGE_FILE) ./...
-	go tool cover -html=$(COVERAGE_FILE)
+	go tool cover -func=$(COVERAGE_FILE)
+
+check: fmt-check vet test test-race build
 
 install:
-	go install
+	go install -ldflags "$(LDFLAGS)" ./cmd/til
 
-lint:
-	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
-	golangci-lint run
-
-# Example usage commands
 run-init: build
 	./$(BINARY_NAME) init
 
 run-add: build
-	@if [ "$(FILE)" = "" ]; then \
-		echo "Error: Please specify a file with FILE=<filename>"; \
-		echo "Example: make run-add FILE=example.txt"; \
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make run-add FILE=example.txt"; \
 		exit 1; \
 	fi
-	./$(BINARY_NAME) add $(FILE)
+	./$(BINARY_NAME) add "$(FILE)"
 
 run-commit: build
-	@if [ "$(MESSAGE)" = "" ]; then \
-		MESSAGE="Learned something new today"; \
-	fi
-	./$(BINARY_NAME) commit -m "$(MESSAGE)"
+	./$(BINARY_NAME) commit -m "$(or $(MESSAGE),Learned something new today)"
 
 run-log: build
-	@if [ "$(NUM)" = "" ]; then \
-		./$(BINARY_NAME) log; \
-	else \
-		./$(BINARY_NAME) log -n $(NUM); \
-	fi
+	./$(BINARY_NAME) log -n "$(or $(NUM),10)"
 
 run-push: build
 	./$(BINARY_NAME) push

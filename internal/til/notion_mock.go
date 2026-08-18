@@ -50,6 +50,12 @@ func (mnc *MockNotionClient) GetEntries(ctx context.Context, limit int) ([]Entry
 // IsEntrySynced checks if an entry has already been synced to Notion
 func (mnc *MockNotionClient) IsEntrySynced(ctx context.Context, entry Entry) (bool, error) {
 	for _, e := range mnc.entries {
+		if e.CommitID != "" && entry.CommitID != "" {
+			if e.CommitID == entry.CommitID {
+				return true, nil
+			}
+			continue
+		}
 		if e.Message == entry.Message {
 			return true, nil
 		}

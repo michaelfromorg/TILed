@@ -3,73 +3,96 @@ package til
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestManager_Init(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir: tempDir,
+func newTestManager(t *testing.T, config Config) (*Manager, string) {
+	t.Helper()
+	if config.DataDir == "" {
+		config.DataDir = t.TempDir()
 	}
 	manager := NewManager(config)
+	require.NoError(t, manager.Init())
+	return manager, config.DataDir
+}
 
-	// Test initial state
+func TestManagerInit(t *testing.T) {
+	root := t.TempDir()
+	manager := NewManager(Config{DataDir: root})
+
 	assert.False(t, manager.IsInitialized())
-
-	// Test initializing the repository
-	err = manager.Init()
-	assert.NoError(t, err)
+	require.NoError(t, manager.Init())
 	assert.True(t, manager.IsInitialized())
-
-	// Verify that the directories and files were created
-	tilDir := filepath.Join(tempDir, "til")
-	filesDir := filepath.Join(tilDir, "files")
-	tilFile := filepath.Join(tilDir, "til.md")
-
-	assert.DirExists(t, tilDir)
-	assert.DirExists(t, filesDir)
-	assert.FileExists(t, tilFile)
-
-	// Verify that initializing an already initialized repository returns an error
-	err = manager.Init()
-	assert.Error(t, err)
+	assert.FileExists(t, filepath.Join(root, "til", "til.db"))
+	assert.DirExists(t, filepath.Join(root, "til", "files"))
+	assert.DirExists(t, filepath.Join(root, ".til", "staging"))
+	assert.ErrorContains(t, manager.Init(), "already initialized")
 }
 
 func TestGenerateCommitID(t *testing.T) {
-	// Test with same message but different timestamps
-	message := "Test message"
-	time1 := time.Now()
-	time2 := time1.Add(time.Second)
+	timestamp := time.Date(2025, 3, 30, 12, 0, 0, 123, time.UTC)
+	id := GenerateCommitID("interfaces", timestamp)
 
-	id1 := GenerateCommitID(message, time1)
-	id2 := GenerateCommitID(message, time2)
+	assert.Len(t, id, 8)
+	assert.Equal(t, id, GenerateCommitID("interfaces", timestamp))
+	assert.NotEqual(t, id, GenerateCommitID("interfaces", timestamp.Add(time.Nanosecond)))
+	assert.NotEqual(t, id, GenerateCommitID("embedding", timestamp))
+}
 
-	// IDs should be different
-	assert.NotEqual(t, id1, id2, "Commit IDs with same message but different timestamps should be different")
+func TestConfigRoundTripAndParentDiscovery(t *testing.T) {
+	root := t.TempDir()
+	config := Config{
+		DataDir:      root,
+		SyncToNotion: true,
+		NotionAPIKey: "secret-token",
+		NotionDBID:   "database-id",
+		SyncToGit:    true,
+		GitRemoteURL: "git@github.com:example/til.git",
+	}
+	require.NoError(t, SaveConfig(config))
 
-	// Test with different messages but same timestamp
-	message1 := "Test message 1"
-	message2 := "Test message 2"
-	timestamp := time.Now()
+	nested := filepath.Join(root, "one", "two")
+	require.NoError(t, os.MkdirAll(nested, 0755))
+	loaded, err := LoadConfig(nested)
+	require.NoError(t, err)
+	assert.Equal(t, config, loaded)
 
-	id1 = GenerateCommitID(message1, timestamp)
-	id2 = GenerateCommitID(message2, timestamp)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(root, ".til", "config"))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	}
 
-	// IDs should be different
-	assert.NotEqual(t, id1, id2, "Commit IDs with different messages but same timestamp should be different")
+	config.NotionAPIKey = "unsafe\nSYNC_TO_GIT=false"
+	assert.ErrorContains(t, SaveConfig(config), "cannot contain a newline")
+}
 
-	// Test idempotence
-	id1 = GenerateCommitID(message, timestamp)
-	id2 = GenerateCommitID(message, timestamp)
+func TestLoadConfigOutsideRepository(t *testing.T) {
+	_, err := LoadConfig(t.TempDir())
+	assert.ErrorContains(t, err, "run 'til init' first")
+	assert.ErrorIs(t, err, ErrConfigNotFound)
+}
 
-	// IDs should be the same
-	assert.Equal(t, id1, id2, "Same message and timestamp should generate the same commit ID")
+func TestUpdateNotionStatusUsesCommitID(t *testing.T) {
+	manager, _ := newTestManager(t, Config{})
+	require.NoError(t, manager.CommitEntry("Repeated message"))
+	require.NoError(t, manager.CommitEntry("Repeated message"))
+
+	entries, err := manager.GetLatestEntries(0)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	require.NotEqual(t, entries[0].CommitID, entries[1].CommitID)
+
+	entries[1].NotionSynced = true
+	require.NoError(t, manager.UpdateEntryNotionSyncStatus(entries[1]))
+
+	updated, err := manager.GetLatestEntries(0)
+	require.NoError(t, err)
+	assert.False(t, updated[0].NotionSynced)
+	assert.True(t, updated[1].NotionSynced)
 }

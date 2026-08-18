@@ -7,227 +7,283 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jomei/notionapi"
 )
 
-// NotionClient wraps the Notion API client
+const (
+	notionTextLimit     = 2000
+	notionChildrenLimit = 100
+)
+
 type NotionClient struct {
-	client *notionapi.Client
-	dbID   notionapi.DatabaseID
+	client       *notionapi.Client
+	dbID         notionapi.DatabaseID
+	gitRemoteURL string
+	gitBranch    string
 }
 
-// NewNotionClient creates a new Notion client
-func NewNotionClient(apiKey string, dbID string) *NotionClient {
-	client := notionapi.NewClient(notionapi.Token(apiKey))
-	return &NotionClient{
-		client: client,
+type NotionClientOption func(*NotionClient)
+
+func WithGitAttachments(remoteURL, branch string) NotionClientOption {
+	return func(client *NotionClient) {
+		client.gitRemoteURL = remoteURL
+		client.gitBranch = branch
+	}
+}
+
+func NewNotionClient(apiKey string, dbID string, options ...NotionClientOption) *NotionClient {
+	client := &NotionClient{
+		client: notionapi.NewClient(notionapi.Token(apiKey)),
 		dbID:   notionapi.DatabaseID(dbID),
 	}
+	for _, option := range options {
+		option(client)
+	}
+	return client
 }
 
-// PushEntry pushes a TIL entry to Notion
 func (nc *NotionClient) PushEntry(ctx context.Context, entry Entry, dataDir string) error {
 	if nc.client == nil {
-		return errors.New("notion client not initialized")
+		return errors.New("Notion client not initialized")
+	}
+	if strings.TrimSpace(string(nc.dbID)) == "" {
+		return errors.New("Notion database ID is empty")
+	}
+	if strings.TrimSpace(entry.Message) == "" {
+		return errors.New("entry message is empty")
+	}
+	if utf8.RuneCountInString(entry.Message) > notionTextLimit {
+		return fmt.Errorf("entry message exceeds Notion's %d-character title limit", notionTextLimit)
 	}
 
-	// Create properties for the new page
 	properties := notionapi.Properties{
 		"TIL": notionapi.TitleProperty{
-			Title: []notionapi.RichText{
-				{
-					Type: "text",
-					Text: &notionapi.Text{
-						Content: entry.Message,
-					},
-				},
-			},
+			Title: []notionapi.RichText{{
+				Type: notionapi.ObjectTypeText,
+				Text: &notionapi.Text{Content: entry.Message},
+			}},
 		},
-		// Created date is automatically added by Notion
 	}
 
-	// Add files if any
 	if len(entry.Files) > 0 {
-		files := make([]notionapi.File, 0, len(entry.Files))
-		dateStr := entry.Date.Format("2006-01-02")
-
-		for _, fileName := range entry.Files {
-			// Get the full path to the file
-			filePath := filepath.Join(dataDir, "til", "files", fmt.Sprintf("%s_%s", dateStr, fileName))
-
-			// Check if file exists
-			if _, err := os.Stat(filePath); err == nil {
-				// In a production environment, these files would be uploaded to a file server
-				// and we would use the URL of the uploaded file. For this implementation,
-				// we'll use a placeholder URL that represents where the file would be
-				// in a GitHub repository or similar hosting service.
-
-				// Extract the repo name from the Git remote URL if available
-				// This is a simplified approach - in a real app, you'd want to properly
-				// upload the files to a file server and get the real URL
-				repoPath := "michaelfromyeg/til"
-
-				externalURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/refs/heads/main/files/%s_%s",
-					repoPath, dateStr, fileName)
-
-				files = append(files, notionapi.File{
-					Name: fileName,
-					Type: notionapi.FileTypeExternal,
-					External: &notionapi.FileObject{
-						URL: externalURL,
-					},
-				})
-			}
+		files, err := nc.attachmentFiles(entry, dataDir)
+		if err != nil {
+			return err
 		}
-
-		// Use the correct Notion API property type for files
 		properties["Attachments"] = notionapi.FilesProperty{
 			Type:  notionapi.PropertyTypeFiles,
 			Files: files,
 		}
 	}
 
-	// Add this code in your PushEntry method where you create the page request
-	var children []notionapi.Block
-	if entry.MessageBody != "" {
-		// Split the message body into paragraphs
-		paragraphs := strings.Split(entry.MessageBody, "\n\n")
-		for _, paragraph := range paragraphs {
-			paragraph = strings.TrimSpace(paragraph)
-			if paragraph == "" {
-				continue
-			}
-
-			// Create a paragraph block for each non-empty paragraph
-			children = append(children, &notionapi.ParagraphBlock{
-				BasicBlock: notionapi.BasicBlock{
-					Object: "block",
-					Type:   notionapi.BlockTypeParagraph,
-				},
-				Paragraph: notionapi.Paragraph{
-					RichText: []notionapi.RichText{
-						{
-							Type: "text",
-							Text: &notionapi.Text{
-								Content: paragraph,
-							},
-						},
-					},
-				},
-			})
-		}
+	children := notionBodyBlocks(entry.MessageBody)
+	if len(children) > notionChildrenLimit {
+		return fmt.Errorf(
+			"entry body requires %d Notion blocks; the API allows %d per page creation",
+			len(children),
+			notionChildrenLimit,
+		)
 	}
 
-	// Create the page request
-	pageReq := &notionapi.PageCreateRequest{
+	request := &notionapi.PageCreateRequest{
 		Parent: notionapi.Parent{
 			Type:       notionapi.ParentTypeDatabaseID,
 			DatabaseID: nc.dbID,
 		},
 		Properties: properties,
+		Children:   children,
 	}
-
-	// Only add children if we have content
-	if len(children) > 0 {
-		pageReq.Children = children
+	if _, err := nc.client.Page.Create(ctx, request); err != nil {
+		return fmt.Errorf("create Notion page: %w", err)
 	}
-
-	// Create the page
-	_, err := nc.client.Page.Create(ctx, pageReq)
-
-	return err
+	return nil
 }
 
-// GetEntries retrieves TIL entries from Notion
 func (nc *NotionClient) GetEntries(ctx context.Context, limit int) ([]Entry, error) {
 	if nc.client == nil {
-		return nil, errors.New("notion client not initialized")
+		return nil, errors.New("Notion client not initialized")
 	}
 
-	// Query the database with a limit
-	query := notionapi.DatabaseQueryRequest{
-		Sorts: []notionapi.SortObject{
-			{
-				Property:  "Created",
-				Direction: "descending",
-			},
-		},
-	}
-
-	if limit > 0 {
-		query.PageSize = limit
-	}
-
-	resp, err := nc.client.Database.Query(ctx, nc.dbID, &query)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert the results to Entry objects
-	entries := make([]Entry, 0, len(resp.Results))
-	for _, page := range resp.Results {
-		// Extract the TIL message
-		title, ok := page.Properties["TIL"].(notionapi.TitleProperty)
-		if !ok || len(title.Title) == 0 {
-			continue
+	entries := []Entry{}
+	var cursor notionapi.Cursor
+	for {
+		pageSize := 100
+		if limit > 0 && limit-len(entries) < pageSize {
+			pageSize = limit - len(entries)
+		}
+		if pageSize <= 0 {
+			break
 		}
 
-		// Extract the date from Notion's Created property
-		date := page.CreatedTime
+		query := notionapi.DatabaseQueryRequest{
+			Sorts: []notionapi.SortObject{{
+				Timestamp: notionapi.TimestampCreated,
+				Direction: notionapi.SortOrderDESC,
+			}},
+			StartCursor: cursor,
+			PageSize:    pageSize,
+		}
+		response, err := nc.client.Database.Query(ctx, nc.dbID, &query)
+		if err != nil {
+			return nil, fmt.Errorf("query Notion database: %w", err)
+		}
 
-		// Extract files
-		var files []string
-		if attachment, ok := page.Properties["Attachments"].(notionapi.FilesProperty); ok {
-			for _, file := range attachment.Files {
-				files = append(files, file.Name)
+		for _, page := range response.Results {
+			entry, ok := entryFromNotionPage(page)
+			if ok {
+				entries = append(entries, entry)
+			}
+			if limit > 0 && len(entries) >= limit {
+				return entries, nil
 			}
 		}
-
-		// Create entry
-		entry := Entry{
-			Date:         date,
-			Message:      title.Title[0].PlainText,
-			Files:        files,
-			IsCommitted:  true,
-			NotionSynced: true, // Mark as synced since it came from Notion
+		if !response.HasMore || response.NextCursor == "" {
+			break
 		}
-
-		entries = append(entries, entry)
+		cursor = response.NextCursor
 	}
-
 	return entries, nil
 }
 
-// IsEntrySynced checks if an entry has already been synced to Notion
-// by comparing the message with existing Notion entries
 func (nc *NotionClient) IsEntrySynced(ctx context.Context, entry Entry) (bool, error) {
 	if nc.client == nil {
-		return false, errors.New("notion client not initialized")
+		return false, errors.New("Notion client not initialized")
 	}
 
-	// Query the database to get all entries
-	query := notionapi.DatabaseQueryRequest{
-		PageSize: 100, // Retrieve up to 100 entries, adjust as needed
+	var cursor notionapi.Cursor
+	for {
+		response, err := nc.client.Database.Query(ctx, nc.dbID, &notionapi.DatabaseQueryRequest{
+			StartCursor: cursor,
+			PageSize:    100,
+		})
+		if err != nil {
+			return false, fmt.Errorf("query Notion sync status: %w", err)
+		}
+
+		for _, page := range response.Results {
+			title, ok := page.Properties["TIL"].(notionapi.TitleProperty)
+			if ok && notionTitle(title) == entry.Message {
+				return true, nil
+			}
+		}
+		if !response.HasMore || response.NextCursor == "" {
+			return false, nil
+		}
+		cursor = response.NextCursor
+	}
+}
+
+func (nc *NotionClient) attachmentFiles(entry Entry, dataDir string) ([]notionapi.File, error) {
+	if strings.TrimSpace(nc.gitRemoteURL) == "" {
+		return nil, errors.New("Notion attachments require a configured GitHub remote")
 	}
 
-	resp, err := nc.client.Database.Query(ctx, nc.dbID, &query)
-	if err != nil {
-		return false, err
-	}
+	files := make([]notionapi.File, 0, len(entry.Files))
+	for _, fileName := range entry.Files {
+		storedName := storedAttachmentName(entry, fileName)
+		localPath := filepath.Join(dataDir, repositoryDirectory, filesDirectoryName, storedName)
+		info, err := os.Stat(localPath)
+		if err != nil {
+			return nil, fmt.Errorf("read attachment %s: %w", fileName, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("attachment is not a regular file: %s", fileName)
+		}
 
-	// Check if any of the entries match our message
-	for _, page := range resp.Results {
-		title, ok := page.Properties["TIL"].(notionapi.TitleProperty)
-		if !ok || len(title.Title) == 0 {
+		externalURL, err := GitHubRawFileURL(
+			nc.gitRemoteURL,
+			nc.gitBranch,
+			filepath.Join(filesDirectoryName, storedName),
+		)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, notionapi.File{
+			Name: filepath.Base(fileName),
+			Type: notionapi.FileTypeExternal,
+			External: &notionapi.FileObject{
+				URL: externalURL,
+			},
+		})
+	}
+	return files, nil
+}
+
+func notionBodyBlocks(body string) []notionapi.Block {
+	paragraphs := strings.Split(strings.TrimSpace(body), "\n\n")
+	blocks := []notionapi.Block{}
+	for _, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
 			continue
 		}
-
-		// Compare title text with our entry message
-		if title.Title[0].PlainText == entry.Message {
-			return true, nil
+		for _, chunk := range splitRunes(paragraph, notionTextLimit) {
+			blocks = append(blocks, &notionapi.ParagraphBlock{
+				BasicBlock: notionapi.BasicBlock{
+					Object: notionapi.ObjectTypeBlock,
+					Type:   notionapi.BlockTypeParagraph,
+				},
+				Paragraph: notionapi.Paragraph{
+					RichText: []notionapi.RichText{{
+						Type: notionapi.ObjectTypeText,
+						Text: &notionapi.Text{Content: chunk},
+					}},
+				},
+			})
 		}
 	}
+	return blocks
+}
 
-	return false, nil
+func splitRunes(value string, limit int) []string {
+	if value == "" {
+		return nil
+	}
+	runes := []rune(value)
+	chunks := make([]string, 0, (len(runes)+limit-1)/limit)
+	for len(runes) > 0 {
+		size := min(limit, len(runes))
+		chunks = append(chunks, string(runes[:size]))
+		runes = runes[size:]
+	}
+	return chunks
+}
+
+func entryFromNotionPage(page notionapi.Page) (Entry, bool) {
+	title, ok := page.Properties["TIL"].(notionapi.TitleProperty)
+	if !ok {
+		return Entry{}, false
+	}
+	message := notionTitle(title)
+	if message == "" {
+		return Entry{}, false
+	}
+
+	files := []string{}
+	if attachment, ok := page.Properties["Attachments"].(notionapi.FilesProperty); ok {
+		for _, file := range attachment.Files {
+			files = append(files, file.Name)
+		}
+	}
+	return Entry{
+		Date:         page.CreatedTime,
+		Message:      message,
+		Files:        files,
+		IsCommitted:  true,
+		NotionSynced: true,
+	}, true
+}
+
+func notionTitle(title notionapi.TitleProperty) string {
+	var value strings.Builder
+	for _, text := range title.Title {
+		if text.PlainText != "" {
+			value.WriteString(text.PlainText)
+		} else if text.Text != nil {
+			value.WriteString(text.Text.Content)
+		}
+	}
+	return value.String()
 }

@@ -1,9 +1,7 @@
-// cmd/status.go
 package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,158 +10,120 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(statusCmd)
-}
-
-var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show TIL status",
-	Long:  `Show the current status of your TIL repository including staged files, Git status, and sync status.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		wd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
-			os.Exit(1)
-		}
-
-		config, err := til.LoadConfig(wd)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
-			os.Exit(1)
-		}
-
-		manager := til.NewManager(config)
-
-		if !manager.IsInitialized() {
-			fmt.Fprintln(os.Stderr, "TIL repository not initialized. Run 'til init' first.")
-			os.Exit(1)
-		}
-
-		// Get today's date
-		today := time.Now().Format("2006-01-02")
-
-		fmt.Println("TIL Status:")
-		fmt.Println("===========")
-
-		// Display latest entry
-		entries, err := manager.GetLatestEntries(1)
-
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting latest entry: %v\n", err)
-		} else if len(entries) > 0 {
-			latestEntry := entries[0]
-			latestDate := latestEntry.Date.Format("2006-01-02")
-
-			fmt.Println("\nLatest Entry:")
-			// Use if/else instead of ternary operator
-			todayStr := ""
-			if latestDate == today {
-				todayStr = " (Today)"
+func newStatusCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show repository status",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			config, manager, err := loadManager()
+			if err != nil {
+				return err
 			}
-			fmt.Printf("Date:    %s%s\n", latestDate, todayStr)
-			fmt.Printf("Message: %s\n", latestEntry.Message)
 
-			// Add MessageBody display
-			if latestEntry.MessageBody != "" {
-				// Print the first line of the message body, or a truncated version if it's long
-				messageBodyPreview := latestEntry.MessageBody
-				if len(messageBodyPreview) > 50 {
-					messageBodyPreview = messageBodyPreview[:47] + "..."
+			output := cmd.OutOrStdout()
+			fmt.Fprintln(output, "TIL Status:")
+			fmt.Fprintln(output, "===========")
+
+			entries, err := manager.GetLatestEntries(1)
+			if err != nil {
+				return err
+			}
+			if len(entries) == 0 {
+				fmt.Fprintln(output, "\nNo entries found.")
+			} else {
+				entry := entries[0]
+				today := ""
+				if entry.Date.Format("2006-01-02") == time.Now().Format("2006-01-02") {
+					today = " (Today)"
 				}
-				fmt.Printf("Body:    %s\n", messageBodyPreview)
-			} else {
-				fmt.Println("Body:    None")
+				fmt.Fprintln(output, "\nLatest Entry:")
+				fmt.Fprintf(output, "Date:    %s%s\n", entry.Date.Format("2006-01-02"), today)
+				fmt.Fprintf(output, "Message: %s\n", entry.Message)
+				if entry.MessageBody == "" {
+					fmt.Fprintln(output, "Body:    None")
+				} else {
+					fmt.Fprintf(output, "Body:    %s\n", preview(entry.MessageBody, 50))
+				}
+				if len(entry.Files) == 0 {
+					fmt.Fprintln(output, "Files:   None")
+				} else {
+					fmt.Fprintf(output, "Files:   %s\n", strings.Join(entry.Files, ", "))
+				}
+				if config.SyncToNotion {
+					status := "Not synced"
+					if entry.NotionSynced {
+						status = "Synced"
+					}
+					fmt.Fprintf(output, "Notion:  %s\n", status)
+				}
 			}
 
-			if len(latestEntry.Files) > 0 {
-				fmt.Printf("Files:   %s\n", strings.Join(latestEntry.Files, ", "))
+			stagedFiles, err := manager.GetStagedFiles()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(output, "\nStaged Files:")
+			if len(stagedFiles) == 0 {
+				fmt.Fprintln(output, "No files staged for commit.")
 			} else {
-				fmt.Println("Files:   None")
+				for _, fileName := range stagedFiles {
+					fmt.Fprintf(output, "- %s\n", fileName)
+				}
+			}
+
+			if config.SyncToGit {
+				gitManager := til.NewGitManager(filepath.Join(config.DataDir, "til"))
+				fmt.Fprintln(output, "\nGit Status:")
+				if !gitManager.IsInitialized() {
+					fmt.Fprintln(output, "Git is not initialized.")
+				} else {
+					status, err := gitManager.Status()
+					if err != nil {
+						return err
+					}
+					if status == "" {
+						fmt.Fprintln(output, "Working tree clean.")
+					} else {
+						fmt.Fprintln(output, status)
+					}
+				}
+				fmt.Fprintf(output, "Remote: %s\n", til.RedactGitRemoteURL(config.GitRemoteURL))
 			}
 
 			if config.SyncToNotion {
-				syncStatus := "Not synced"
-				if latestEntry.NotionSynced {
-					syncStatus = "Synced"
-				}
-				fmt.Printf("Notion:  %s\n", syncStatus)
-			}
-		} else {
-			fmt.Println("\nNo entries found.")
-		}
-
-		// Display staged files
-		stagedFiles, err := manager.GetStagedFiles()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting staged files: %v\n", err)
-		} else {
-			fmt.Println("\nStaged Files:")
-			if len(stagedFiles) > 0 {
-				for _, file := range stagedFiles {
-					fmt.Printf("- %s\n", file)
-				}
-			} else {
-				fmt.Println("No files staged for commit.")
-			}
-		}
-
-		// Display Git status if git sync is enabled
-		if config.SyncToGit {
-			tilDir := filepath.Join(config.DataDir, "til")
-			gitManager := til.NewGitManager(tilDir)
-
-			// Check if Git is initialized
-			if gitManager.IsInitialized() {
-				fmt.Println("\nGit Status:")
-				status, err := gitManager.Status()
+				allEntries, err := manager.GetLatestEntries(0)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error getting Git status: %v\n", err)
-				} else if status == "" {
-					fmt.Println("Working tree clean, no changes to commit.")
-				} else {
-					fmt.Println(status)
+					return err
 				}
-
-				// Display remote URL
-				fmt.Printf("\nGit Remote: %s\n", config.GitRemoteURL)
-			} else {
-				fmt.Println("\nGit not initialized in the TIL repository.")
-			}
-		}
-
-		// Display notion sync status if enabled
-		if config.SyncToNotion {
-			fmt.Println("\nNotion Sync:")
-			fmt.Printf("API Key: %s\n", maskString(config.NotionAPIKey))
-			fmt.Printf("DB ID:   %s\n", maskString(config.NotionDBID))
-
-			// Count synced vs unsynced entries
-			allEntries, err := manager.GetLatestEntries(0)
-
-			if err == nil {
 				synced := 0
 				for _, entry := range allEntries {
 					if entry.NotionSynced {
 						synced++
 					}
 				}
-				fmt.Printf("Synced:  %d/%d entries\n", synced, len(allEntries))
+				fmt.Fprintln(output, "\nNotion Sync:")
+				fmt.Fprintf(output, "API Key: %s\n", maskString(config.NotionAPIKey))
+				fmt.Fprintf(output, "DB ID:   %s\n", maskString(config.NotionDBID))
+				fmt.Fprintf(output, "Synced:  %d/%d entries\n", synced, len(allEntries))
 			}
-		}
-
-		// Provide helpful hints
-		fmt.Println("\nCommands:")
-		fmt.Println("- Use 'til add <file>' to stage files")
-		fmt.Println("- Use 'til commit -m \"message\"' to create a new entry")
-		fmt.Println("- Use 'til push' to sync with Notion and Git")
-	},
+			return nil
+		},
+	}
 }
 
-// Helper function to mask sensitive information
-func maskString(s string) string {
-	if len(s) <= 8 {
+func preview(value string, limit int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit-3]) + "..."
+}
+
+func maskString(value string) string {
+	runes := []rune(value)
+	if len(runes) <= 8 {
 		return "********"
 	}
-	return s[:4] + "..." + s[len(s)-4:]
+	return string(runes[:4]) + "..." + string(runes[len(runes)-4:])
 }

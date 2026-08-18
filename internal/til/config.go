@@ -2,82 +2,108 @@ package til
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// LoadConfig loads the configuration from the .til/config file
+var ErrConfigNotFound = errors.New("no TIL repository found")
+
 func LoadConfig(dir string) (Config, error) {
-	config := Config{
-		DataDir: dir,
+	root, err := findConfigRoot(dir)
+	if err != nil {
+		return Config{DataDir: dir}, err
 	}
 
-	// Read configuration file
-	configFile := filepath.Join(dir, ".til", "config")
+	config := Config{DataDir: root}
+	configFile := filepath.Join(root, metadataDirectoryName, "config")
 	file, err := os.Open(configFile)
 	if err != nil {
-		return config, err
+		return config, fmt.Errorf("open configuration: %w", err)
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
+		key, value, ok := strings.Cut(scanner.Text(), "=")
+		if !ok {
 			continue
 		}
 
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		switch key {
+		switch strings.TrimSpace(key) {
 		case "SYNC_TO_NOTION":
-			config.SyncToNotion = value == "true"
+			config.SyncToNotion = strings.TrimSpace(value) == "true"
 		case "NOTION_API_KEY":
-			config.NotionAPIKey = value
+			config.NotionAPIKey = strings.TrimSpace(value)
 		case "NOTION_DB_ID":
-			config.NotionDBID = value
+			config.NotionDBID = strings.TrimSpace(value)
 		case "SYNC_TO_GIT":
-			config.SyncToGit = value == "true"
+			config.SyncToGit = strings.TrimSpace(value) == "true"
 		case "GIT_REMOTE_URL":
-			config.GitRemoteURL = value
+			config.GitRemoteURL = strings.TrimSpace(value)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return config, fmt.Errorf("read configuration: %w", err)
+	}
+
+	return config, nil
+}
+
+func SaveConfig(config Config) error {
+	for name, value := range map[string]string{
+		"NOTION_API_KEY": config.NotionAPIKey,
+		"NOTION_DB_ID":   config.NotionDBID,
+		"GIT_REMOTE_URL": config.GitRemoteURL,
+	} {
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("%s cannot contain a newline", name)
 		}
 	}
 
-	return config, scanner.Err()
+	var content bytes.Buffer
+	fmt.Fprintf(&content, "SYNC_TO_NOTION=%t\n", config.SyncToNotion)
+	if config.SyncToNotion {
+		fmt.Fprintf(&content, "NOTION_API_KEY=%s\n", config.NotionAPIKey)
+		fmt.Fprintf(&content, "NOTION_DB_ID=%s\n", config.NotionDBID)
+	}
+	fmt.Fprintf(&content, "SYNC_TO_GIT=%t\n", config.SyncToGit)
+	if config.SyncToGit {
+		fmt.Fprintf(&content, "GIT_REMOTE_URL=%s\n", config.GitRemoteURL)
+	}
+
+	configFile := filepath.Join(config.DataDir, metadataDirectoryName, "config")
+	if err := writeFileAtomic(configFile, content.Bytes(), 0600); err != nil {
+		return fmt.Errorf("save configuration: %w", err)
+	}
+	return nil
 }
 
-// SaveConfig saves the configuration to the .til/config file
-func SaveConfig(config Config) error {
-	configDir := filepath.Join(config.DataDir, ".til")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return err
-	}
-
-	configFile := filepath.Join(configDir, "config")
-	f, err := os.Create(configFile)
+func findConfigRoot(start string) (string, error) {
+	current, err := filepath.Abs(start)
 	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	// Write configuration to file
-	if config.SyncToNotion {
-		f.WriteString("SYNC_TO_NOTION=true\n")
-		f.WriteString("NOTION_API_KEY=" + config.NotionAPIKey + "\n")
-		f.WriteString("NOTION_DB_ID=" + config.NotionDBID + "\n")
-	} else {
-		f.WriteString("SYNC_TO_NOTION=false\n")
+		return "", fmt.Errorf("resolve working directory: %w", err)
 	}
 
-	if config.SyncToGit {
-		f.WriteString("SYNC_TO_GIT=true\n")
-		f.WriteString("GIT_REMOTE_URL=" + config.GitRemoteURL + "\n")
-	} else {
-		f.WriteString("SYNC_TO_GIT=false\n")
+	for {
+		configPath := filepath.Join(current, metadataDirectoryName, "config")
+		info, statErr := os.Stat(configPath)
+		if statErr == nil && info.Mode().IsRegular() {
+			return current, nil
+		}
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return "", fmt.Errorf("inspect configuration: %w", statErr)
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
 	}
 
-	return nil
+	return "", fmt.Errorf("%w from %s; run 'til init' first", ErrConfigNotFound, start)
 }

@@ -10,6 +10,17 @@ import (
 	"time"
 )
 
+const (
+	metadataDirectoryName   = ".til"
+	repositoryDirectory     = "til"
+	databaseFileName        = "til.db"
+	yamlStorageFileName     = "til.yml"
+	markdownStorageFileName = "til.md"
+	filesDirectoryName      = "files"
+)
+
+var ErrRepositoryNotInitialized = errors.New("TIL repository not initialized")
+
 type Config struct {
 	DataDir      string
 	NotionAPIKey string
@@ -34,105 +45,55 @@ type Manager struct {
 }
 
 func NewManager(config Config) *Manager {
-	return &Manager{
-		Config: config,
-	}
+	return &Manager{Config: config}
 }
 
-// IsInitialized checks if either YAML or Markdown repository is initialized
 func (m *Manager) IsInitialized() bool {
-	tilDir := filepath.Join(m.Config.DataDir, "til")
-	tilFile := filepath.Join(tilDir, "til.yml")
-
-	// Check if the til directory and til.yml file exist
-	_, err := os.Stat(tilFile)
-	return err == nil
+	info, err := os.Stat(m.databasePath())
+	return err == nil && info.Mode().IsRegular()
 }
 
 func (m *Manager) Init() error {
-	if m.IsInitialized() {
-		return errors.New("TIL repository already initialized")
-	}
-
-	tilDir := filepath.Join(m.Config.DataDir, "til")
-	if err := os.MkdirAll(tilDir, 0755); err != nil {
-		return err
-	}
-
-	filesDir := filepath.Join(tilDir, "files")
-	if err := os.MkdirAll(filesDir, 0755); err != nil {
-		return err
-	}
-
-	// Create til.yml file
-	tilFile := filepath.Join(tilDir, "til.yml")
-	storage := &YAMLStorage{
-		Entries: []YAMLEntry{},
-	}
-
-	return SaveYAMLStorage(tilFile, storage)
+	return m.initializeDatabase()
 }
 
-// Grabs all entries and validates what is synced to Notion (or not)
 func (m *Manager) UpdateEntryNotionSyncStatus(entry Entry) error {
 	if !m.IsInitialized() {
-		return errors.New("TIL repository not initialized")
+		return ErrRepositoryNotInitialized
 	}
-
-	tilFile := filepath.Join(m.Config.DataDir, "til", "til.yml")
-	storage, err := LoadYAMLStorage(tilFile)
-	if err != nil {
-		return err
-	}
-
-	// Find the entry with matching date and message
-	found := false
-	for i, e := range storage.Entries {
-		if e.Date.Format("2006-01-02") == entry.Date.Format("2006-01-02") && e.Message == entry.Message {
-			storage.Entries[i].NotionSynced = entry.NotionSynced
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return errors.New("entry not found")
-	}
-
-	return SaveYAMLStorage(tilFile, storage)
+	return m.updateNotionSyncStatus(entry)
 }
 
-// TODO(michaelfromyeg): this should be a part of the YAML loading step, not a separate function
-func (m *Manager) LoadEntryMessageBodies(entries []Entry) []Entry {
-	for i, entry := range entries {
-		// Skip entries that don't have a body marker
-		if entry.MessageBody == "" && entry.MessageBody != "has_body" {
-			continue
-		}
-
-		dateStr := entry.Date.Format("2006-01-02")
-		bodyFilePath := filepath.Join(m.Config.DataDir, "til", "files", fmt.Sprintf("%s_body.md", dateStr))
-
-		// Check if the body file exists
-		if _, err := os.Stat(bodyFilePath); err == nil {
-			// File exists, read the body content
-			bodyContent, err := os.ReadFile(bodyFilePath)
-			if err == nil {
-				entries[i].MessageBody = string(bodyContent)
-			}
-		}
-	}
-	return entries
+func (m *Manager) repositoryDir() string {
+	return filepath.Join(m.Config.DataDir, repositoryDirectory)
 }
 
-// GenerateCommitID creates a unique ID for a commit based on its message and timestamp
+func (m *Manager) filesDir() string {
+	return filepath.Join(m.repositoryDir(), filesDirectoryName)
+}
+
+func (m *Manager) stagingDir() string {
+	return filepath.Join(m.Config.DataDir, metadataDirectoryName, "staging")
+}
+
+func storedAttachmentName(entry Entry, fileName string) string {
+	prefix := entry.CommitID
+	if prefix == "" {
+		prefix = entry.Date.Format("2006-01-02")
+	}
+	return fmt.Sprintf("%s_%s", prefix, filepath.Base(fileName))
+}
+
+func bodyFileName(entry Entry) string {
+	if entry.CommitID != "" {
+		return fmt.Sprintf("body_%s.md", entry.CommitID)
+	}
+	return fmt.Sprintf("%s_body.md", entry.Date.Format("2006-01-02"))
+}
+
+// GenerateCommitID creates a stable short identifier from a message and timestamp.
 func GenerateCommitID(message string, timestamp time.Time) string {
-	// Combine message and timestamp
 	data := fmt.Sprintf("%s-%d", message, timestamp.UnixNano())
-
-	// Generate SHA-256 hash
 	hash := sha256.Sum256([]byte(data))
-
-	// Convert to hex string and take first 8 characters (like Git's short hash)
 	return hex.EncodeToString(hash[:])[:8]
 }

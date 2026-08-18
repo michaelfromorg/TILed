@@ -1,499 +1,170 @@
 package til
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestFileOperations(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+func TestCommitAndAmendWorkflow(t *testing.T) {
+	manager, root := newTestManager(t, Config{SyncToGit: true})
 
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir: tempDir,
-	}
-	manager := NewManager(config)
+	source := filepath.Join(root, "daily note.txt")
+	require.NoError(t, os.WriteFile(source, []byte("version one"), 0640))
+	require.NoError(t, manager.AddFile(source))
+	require.NoError(t, manager.CommitEntryWithBody("Learned pipes | safely", "First paragraph.\n\nSecond paragraph."))
 
-	// Initialize the repository
-	err = manager.Init()
-	assert.NoError(t, err)
+	entries, err := manager.GetLatestEntries(0)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	entry := entries[0]
+	require.NotEmpty(t, entry.CommitID)
+	assert.Equal(t, []string{"daily note.txt"}, entry.Files)
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", entry.MessageBody)
 
-	// Create a test file
-	testFilePath := filepath.Join(tempDir, "test.txt")
-	err = os.WriteFile(testFilePath, []byte("Test content"), 0644)
-	assert.NoError(t, err)
+	attachmentPath := filepath.Join(root, "til", "files", entry.CommitID+"_daily note.txt")
+	bodyPath := filepath.Join(root, "til", "files", "body_"+entry.CommitID+".md")
+	assert.FileExists(t, attachmentPath)
+	assert.FileExists(t, bodyPath)
 
-	// Test adding a file
-	err = manager.AddFile(testFilePath)
-	assert.NoError(t, err)
+	entry.NotionSynced = true
+	require.NoError(t, manager.UpdateEntryNotionSyncStatus(entry))
+	require.NoError(t, os.WriteFile(source, []byte("version two"), 0640))
+	secondSource := filepath.Join(root, "example.go")
+	require.NoError(t, os.WriteFile(secondSource, []byte("package example"), 0644))
+	require.NoError(t, manager.AddFile(source))
+	require.NoError(t, manager.AddFile(secondSource))
+	require.NoError(t, manager.AmendLastEntryWithBody("Learned pipes and links", "Replacement body"))
 
-	// Test getting staged files
-	stagedFiles, err := manager.GetStagedFiles()
-	assert.NoError(t, err)
-	assert.Len(t, stagedFiles, 1)
-	assert.Equal(t, "test.txt", stagedFiles[0])
+	entries, err = manager.GetLatestEntries(0)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	amended := entries[0]
+	assert.Equal(t, entry.CommitID, amended.CommitID)
+	assert.Equal(t, "Learned pipes and links", amended.Message)
+	assert.Equal(t, "Replacement body", amended.MessageBody)
+	assert.Equal(t, []string{"daily note.txt", "example.go"}, amended.Files)
+	assert.False(t, amended.NotionSynced)
 
-	// Test committing an entry
-	err = manager.CommitEntry("Test message")
-	assert.NoError(t, err)
+	updatedAttachment, err := os.ReadFile(attachmentPath)
+	require.NoError(t, err)
+	assert.Equal(t, "version two", string(updatedAttachment))
+	assert.FileExists(t, filepath.Join(root, "til", "files", entry.CommitID+"_example.go"))
 
-	// Test that the staged files are cleared
-	stagedFiles, err = manager.GetStagedFiles()
-	assert.NoError(t, err)
-	assert.Len(t, stagedFiles, 0)
+	staged, err := manager.GetStagedFiles()
+	require.NoError(t, err)
+	assert.Empty(t, staged)
 
-	// Test getting the latest entries
-	entries, err := manager.GetLatestEntries(1)
-	assert.NoError(t, err)
-	assert.Len(t, entries, 1)
-	assert.Equal(t, "Test message", entries[0].Message)
-	assert.Len(t, entries[0].Files, 1)
-	assert.Equal(t, "test.txt", entries[0].Files[0])
-
-	// Test amending the commit
-	err = manager.AmendLastEntry("Amended message")
-	assert.NoError(t, err)
-
-	// Test getting the amended entry
-	entries, err = manager.GetLatestEntries(1)
-	assert.NoError(t, err)
-	assert.Len(t, entries, 1)
-	assert.Equal(t, "Amended message", entries[0].Message)
+	readme, err := os.ReadFile(filepath.Join(root, "til", "README.md"))
+	require.NoError(t, err)
+	readmeText := string(readme)
+	assert.Contains(t, readmeText, "(files/body_"+entry.CommitID+".md)")
+	assert.Contains(t, readmeText, "(files/"+entry.CommitID+"_daily%20note.txt)")
+	assert.NotContains(t, readmeText, "til/files/")
 }
 
-func TestAddAndClearFiles(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+func TestMultipleSameDayCommitsHaveDistinctAssets(t *testing.T) {
+	manager, root := newTestManager(t, Config{})
+	source := filepath.Join(root, "example.txt")
 
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir: tempDir,
-	}
-	manager := NewManager(config)
+	require.NoError(t, os.WriteFile(source, []byte("first"), 0644))
+	require.NoError(t, manager.AddFile(source))
+	require.NoError(t, manager.CommitEntry("Same message"))
 
-	// Initialize the repository
-	err = manager.Init()
-	assert.NoError(t, err)
+	require.NoError(t, os.WriteFile(source, []byte("second"), 0644))
+	require.NoError(t, manager.AddFile(source))
+	require.NoError(t, manager.CommitEntry("Same message"))
 
-	// Create multiple test files
-	testFilePaths := []string{
-		filepath.Join(tempDir, "test1.txt"),
-		filepath.Join(tempDir, "test2.txt"),
-		filepath.Join(tempDir, "test3.txt"),
-	}
-
-	for i, path := range testFilePaths {
-		err = os.WriteFile(path, []byte(fmt.Sprintf("Test content %d", i+1)), 0644)
-		assert.NoError(t, err)
-	}
-
-	// Add all files
-	for _, path := range testFilePaths {
-		err = manager.AddFile(path)
-		assert.NoError(t, err)
-	}
-
-	// Get staged files
-	stagedFiles, err := manager.GetStagedFiles()
-	assert.NoError(t, err)
-	assert.Len(t, stagedFiles, 3)
-
-	// Clear staged files
-	err = manager.ClearStagedFiles()
-	assert.NoError(t, err)
-
-	// Verify files are cleared
-	stagedFiles, err = manager.GetStagedFiles()
-	assert.NoError(t, err)
-	assert.Len(t, stagedFiles, 0)
+	entries, err := manager.GetLatestEntries(0)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	assert.NotEqual(t, entries[0].CommitID, entries[1].CommitID)
+	assert.FileExists(t, filepath.Join(root, "til", "files", entries[0].CommitID+"_example.txt"))
+	assert.FileExists(t, filepath.Join(root, "til", "files", entries[1].CommitID+"_example.txt"))
 }
 
-func TestMultipleCommits(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+func TestCommitValidationDoesNotMutateRepository(t *testing.T) {
+	manager, _ := newTestManager(t, Config{})
 
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir: tempDir,
-	}
-	manager := NewManager(config)
+	assert.ErrorContains(t, manager.CommitEntry(""), "cannot be empty")
+	assert.ErrorContains(t, manager.CommitEntry(" \t "), "cannot be empty")
+	assert.ErrorContains(t, manager.CommitEntry("title\nbody"), "single line")
 
-	// Initialize the repository
-	err = manager.Init()
-	assert.NoError(t, err)
-
-	// Create and commit multiple entries
-	entries := []struct {
-		message string
-		files   []string
-	}{
-		{
-			message: "First entry",
-			files:   []string{"file1.txt", "file2.txt"},
-		},
-		{
-			message: "Second entry",
-			files:   []string{"file3.txt"},
-		},
-		{
-			message: "Third entry",
-			files:   []string{},
-		},
-	}
-
-	// Helper function to create and add a test file
-	createAndAddFile := func(fileName, content string) {
-		filePath := filepath.Join(tempDir, fileName)
-		err := os.WriteFile(filePath, []byte(content), 0644)
-		assert.NoError(t, err)
-		err = manager.AddFile(filePath)
-		assert.NoError(t, err)
-	}
-
-	// Create entries with a 1-day gap between them
-	// now := time.Now()
-	for i, entry := range entries {
-		// Mock files
-		for _, fileName := range entry.files {
-			createAndAddFile(fileName, fmt.Sprintf("Content for %s", fileName))
-		}
-
-		// Commit
-		err := manager.CommitEntry(entry.message)
-		assert.NoError(t, err)
-
-		// Set the date for the next entry (1 day later)
-		if i < len(entries)-1 {
-			time.Sleep(1 * time.Millisecond) // Ensure different timestamps
-		}
-	}
-
-	// Test getting all entries
-	allEntries, err := manager.GetLatestEntries(0)
-	assert.NoError(t, err)
-	assert.Len(t, allEntries, 3)
-
-	// Entries should be in reverse order (latest first)
-	assert.Equal(t, "Third entry", allEntries[0].Message)
-	assert.Equal(t, "Second entry", allEntries[1].Message)
-	assert.Equal(t, "First entry", allEntries[2].Message)
-
-	// Check file counts
-	assert.Len(t, allEntries[0].Files, 0)
-	assert.Len(t, allEntries[1].Files, 1)
-	assert.Len(t, allEntries[2].Files, 2)
-
-	// Test limit
-	limitedEntries, err := manager.GetLatestEntries(2)
-	assert.NoError(t, err)
-	assert.Len(t, limitedEntries, 2)
-	assert.Equal(t, "Third entry", limitedEntries[0].Message)
-	assert.Equal(t, "Second entry", limitedEntries[1].Message)
+	entries, err := manager.GetLatestEntries(0)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
-func TestNonExistentFileAdd(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+func TestAddFileValidation(t *testing.T) {
+	manager, root := newTestManager(t, Config{})
 
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir: tempDir,
-	}
-	manager := NewManager(config)
+	assert.ErrorContains(t, manager.AddFile(filepath.Join(root, "missing.txt")), "file not found")
+	assert.ErrorContains(t, manager.AddFile(root), "non-regular file")
 
-	// Initialize the repository
-	err = manager.Init()
-	assert.NoError(t, err)
-
-	// Try to add a non-existent file
-	err = manager.AddFile(filepath.Join(tempDir, "non-existent-file.txt"))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "file not found")
+	largeFile := filepath.Join(root, "large.bin")
+	file, err := os.Create(largeFile)
+	require.NoError(t, err)
+	require.NoError(t, file.Truncate(MaxFileSize+1))
+	require.NoError(t, file.Close())
+	assert.ErrorContains(t, manager.AddFile(largeFile), "file too large")
 }
 
-func TestEmptyCommitMessage(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+func TestMigrateMarkdownRepository(t *testing.T) {
+	root := t.TempDir()
+	filesDir := filepath.Join(root, "til", "files")
+	require.NoError(t, os.MkdirAll(filesDir, 0755))
 
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir: tempDir,
-	}
-	manager := NewManager(config)
+	legacy := `# Today I Learned
 
-	// Initialize the repository
-	err = manager.Init()
-	assert.NoError(t, err)
-
-	// Try to commit with an empty message
-	err = manager.CommitEntry("")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "commit message cannot be empty")
-
-	// Try to commit with just whitespace
-	err = manager.CommitEntry("   ")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "commit message cannot be empty")
-}
-
-func TestAmendNonExistentEntry(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir: tempDir,
-	}
-	manager := NewManager(config)
-
-	// Initialize the repository
-	err = manager.Init()
-	assert.NoError(t, err)
-
-	// Try to amend when there are no entries
-	err = manager.AmendLastEntry("Amended message")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no entries found to amend")
-}
-
-func TestParseEntries(t *testing.T) {
-	// Test parsing entries from markdown content
-	content := `# Today I Learned
-
-| Date | Entry | Files |
-| --- | --- | --- |
-
-## 2023-01-01
+## 2024-06-01
 
 First entry
+<!-- notion-synced: true -->
+[Read more](files/2024-06-01_body.md)
 
 Files:
-- [file1.txt](files/2023-01-01_file1.txt)
-- [file2.txt](files/2023-01-01_file2.txt)
+- [example.txt](files/2024-06-01_example.txt)
 
-## 2023-01-02
-
-Second entry
-
-## 2023-01-03
-
-Third entry
-
-Files:
-- [file3.txt](files/2023-01-03_file3.txt)
-`
-
-	entries, err := parseEntries(content)
-	assert.NoError(t, err)
-	assert.Len(t, entries, 3)
-
-	// Entries should be in reverse order (latest first)
-	assert.Equal(t, "Third entry", entries[0].Message)
-	assert.Equal(t, "2023-01-03", entries[0].Date.Format("2006-01-02"))
-	assert.Len(t, entries[0].Files, 1)
-	assert.Equal(t, "file3.txt", entries[0].Files[0])
-
-	assert.Equal(t, "Second entry", entries[1].Message)
-	assert.Equal(t, "2023-01-02", entries[1].Date.Format("2006-01-02"))
-	assert.Len(t, entries[1].Files, 0)
-
-	assert.Equal(t, "First entry", entries[2].Message)
-	assert.Equal(t, "2023-01-01", entries[2].Date.Format("2006-01-02"))
-	assert.Len(t, entries[2].Files, 2)
-	assert.Equal(t, "file1.txt", entries[2].Files[0])
-	assert.Equal(t, "file2.txt", entries[2].Files[1])
-}
-
-func TestInvalidDateInLog(t *testing.T) {
-	// Test parsing entries with an invalid date
-	content := `# Today I Learned
-
-| Date | Entry | Files |
-| --- | --- | --- |
-
-## Not a date
-
-First entry
-
-## 2023-01-02
+## 2024-06-02
 
 Second entry
 `
+	require.NoError(t, os.WriteFile(filepath.Join(root, "til", "til.md"), []byte(legacy), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "2024-06-01_example.txt"), []byte("example"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "2024-06-01_body.md"), []byte("Legacy body"), 0644))
 
-	entries, err := parseEntries(content)
-	assert.NoError(t, err)
-	assert.Len(t, entries, 1) // Only one valid entry
+	manager := NewManager(Config{DataDir: root})
+	require.NoError(t, manager.MigrateToSQL())
+	assert.True(t, manager.IsInitialized())
+	assert.FileExists(t, filepath.Join(root, "til", "til.db"))
+	assert.FileExists(t, filepath.Join(root, ".til", "backups", "til.md.bak"))
+	assert.NoFileExists(t, filepath.Join(root, "til", "til.md"))
 
-	assert.Equal(t, "Second entry", entries[0].Message)
-	assert.Equal(t, "2023-01-02", entries[0].Date.Format("2006-01-02"))
+	entries, err := manager.GetLatestEntries(0)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	first := entries[1]
+	assert.Equal(t, "First entry", first.Message)
+	assert.Equal(t, "Legacy body", strings.TrimSpace(first.MessageBody))
+	assert.True(t, first.NotionSynced)
+	assert.FileExists(t, filepath.Join(filesDir, first.CommitID+"_example.txt"))
+	assert.FileExists(t, filepath.Join(filesDir, "body_"+first.CommitID+".md"))
+	assert.NoFileExists(t, filepath.Join(filesDir, "2024-06-01_example.txt"))
+	assert.ErrorContains(t, manager.MigrateToSQL(), "already uses SQLite")
 }
 
-func TestCopyFile(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+func TestParseEntriesSkipsInvalidDates(t *testing.T) {
+	entries, err := parseEntries(`## invalid
+ignored
 
-	// Create a source file
-	srcPath := filepath.Join(tempDir, "source.txt")
-	content := "Test file content"
-	err = os.WriteFile(srcPath, []byte(content), 0644)
-	assert.NoError(t, err)
-
-	// Copy to destination
-	dstPath := filepath.Join(tempDir, "destination.txt")
-	err = copyFile(srcPath, dstPath)
-	assert.NoError(t, err)
-
-	// Check if the destination file exists
-	_, err = os.Stat(dstPath)
-	assert.NoError(t, err)
-
-	// Check the content
-	dstContent, err := os.ReadFile(dstPath)
-	assert.NoError(t, err)
-	assert.Equal(t, content, string(dstContent))
-
-	// Test error case - source doesn't exist
-	err = copyFile(filepath.Join(tempDir, "nonexistent.txt"), dstPath)
-	assert.Error(t, err)
-}
-
-func TestUpdateReadme(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Create til directory
-	tilDir := filepath.Join(tempDir, "til")
-	err = os.MkdirAll(tilDir, 0755)
-	assert.NoError(t, err)
-
-	// Create a Manager with the temporary directory
-	config := Config{
-		DataDir:   tempDir,
-		SyncToGit: true,
-	}
-	manager := NewManager(config)
-
-	// Create an entry
-	now := time.Now()
-	entry := Entry{
-		Date:        now,
-		Message:     "Test entry",
-		Files:       []string{"test.txt"},
-		IsCommitted: true,
-	}
-
-	// Test updating a non-existent README
-	err = manager.updateReadme(entry)
-	assert.NoError(t, err)
-
-	// Check if README was created
-	readmePath := filepath.Join(tilDir, "README.md")
-	_, err = os.Stat(readmePath)
-	assert.NoError(t, err)
-
-	// Read the README content
-	content, err := os.ReadFile(readmePath)
-	assert.NoError(t, err)
-
-	// Verify that the entry is in the README
-	assert.Contains(t, string(content), "Test entry")
-	assert.Contains(t, string(content), now.Format("2006-01-02"))
-	assert.Contains(t, string(content), "test.txt")
-
-	// Test updating an existing README
-	entry2 := Entry{
-		Date:        now.Add(24 * time.Hour),
-		Message:     "Second entry",
-		Files:       []string{"test2.txt"},
-		IsCommitted: true,
-	}
-
-	err = manager.updateReadme(entry2)
-	assert.NoError(t, err)
-
-	// Read the README content again
-	content, err = os.ReadFile(readmePath)
-	assert.NoError(t, err)
-
-	// Verify that both entries are in the README
-	assert.Contains(t, string(content), "Test entry")
-	assert.Contains(t, string(content), "Second entry")
-	assert.Contains(t, string(content), entry2.Date.Format("2006-01-02"))
-}
-
-func TestGitIntegration(t *testing.T) {
-	// Skip this test if git is not installed
-	_, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("Git not installed, skipping test")
-	}
-
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "til-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Create til directory
-	tilDir := filepath.Join(tempDir, "til")
-	err = os.MkdirAll(tilDir, 0755)
-	assert.NoError(t, err)
-
-	// Create a Manager with Git enabled
-	config := Config{
-		DataDir:      tempDir,
-		SyncToGit:    true,
-		GitRemoteURL: "git@github.com:michaelfromyeg/til.git", // Fake URL for testing
-	}
-	manager := NewManager(config)
-
-	// Initialize the repository
-	err = manager.Init()
-	assert.NoError(t, err)
-
-	// Initialize Git
-	gitManager := NewGitManager(tilDir)
-	err = gitManager.Init("git@github.com:michaelfromyeg/til.git")
-	assert.NoError(t, err)
-
-	// Create a test file
-	testFilePath := filepath.Join(tempDir, "test.txt")
-	err = os.WriteFile(testFilePath, []byte("Test content"), 0644)
-	assert.NoError(t, err)
-
-	// Add the file
-	err = manager.AddFile(testFilePath)
-	assert.NoError(t, err)
-
-	// The commit will try to push, which would fail with our fake URL
-	// But it should handle the error gracefully and continue
-	err = manager.CommitEntry("Test commit with Git integration")
-	assert.NoError(t, err)
-
-	// Verify that a git repository was created
-	gitDir := filepath.Join(tilDir, ".git")
-	_, err = os.Stat(gitDir)
-	assert.NoError(t, err)
+## 2024-01-02
+kept
+`)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "kept", entries[0].Message)
 }

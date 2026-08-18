@@ -10,6 +10,9 @@ import (
 // GetDefaultEditor returns the user's default editor from EDITOR env variable
 // or fallbacks to common editors
 func GetDefaultEditor() string {
+	if editor := os.Getenv("TIL_EDITOR"); editor != "" {
+		return editor
+	}
 	if editor := os.Getenv("EDITOR"); editor != "" {
 		return editor
 	}
@@ -43,13 +46,19 @@ func OpenEditor(initialContent string) (string, error) {
 			return "", err
 		}
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return "", err
+	}
 
 	// Get the editor command
-	editor := GetDefaultEditor()
+	editorParts := strings.Fields(GetDefaultEditor())
+	if len(editorParts) == 0 {
+		return "", os.ErrInvalid
+	}
 
 	// Open the editor
-	cmd := exec.Command(editor, tmpFile.Name())
+	args := append(editorParts[1:], tmpFile.Name())
+	cmd := exec.Command(editorParts[0], args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

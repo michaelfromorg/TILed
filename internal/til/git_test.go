@@ -1,94 +1,117 @@
 package til
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestGitManager(t *testing.T) {
-	// Skip if git is not installed
-	_, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("Git not found, skipping test")
-	}
+func TestGitManagerWithEmptyAndExistingRemote(t *testing.T) {
+	requireGit(t)
+	setGitIdentity(t)
 
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "git-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	remote := newBareRepository(t)
+	firstWorktree := filepath.Join(t.TempDir(), "first")
+	first := NewGitManager(firstWorktree)
+	require.NoError(t, first.Init(remote))
+	assert.Equal(t, "main", mustCurrentBranch(t, first))
 
-	// Create a GitManager with the temporary directory
-	gitManager := NewGitManager(tempDir)
+	require.NoError(t, os.WriteFile(filepath.Join(firstWorktree, "til.yml"), []byte("entries: []\n"), 0644))
+	require.NoError(t, first.AddAll())
+	hasChanges, err := first.HasStagedChanges()
+	require.NoError(t, err)
+	assert.True(t, hasChanges)
+	require.NoError(t, first.Commit("Initial TIL data"))
+	assert.ErrorIs(t, first.Commit("Nothing else"), ErrNoChanges)
+	require.NoError(t, first.Push())
 
-	// Test initial state
-	assert.False(t, gitManager.IsInitialized())
+	secondWorktree := filepath.Join(t.TempDir(), "second")
+	second := NewGitManager(secondWorktree)
+	require.NoError(t, second.Init(remote))
+	assert.FileExists(t, filepath.Join(secondWorktree, "til.yml"))
+	assert.Equal(t, "main", mustCurrentBranch(t, second))
 
-	// Test initialization
-	err = gitManager.Init("git@github.com:michaelfromyeg/til.git")
-	assert.NoError(t, err)
-	assert.True(t, gitManager.IsInitialized())
-
-	// Test double initialization
-	err = gitManager.Init("git@github.com:michaelfromyeg/til.git")
-	assert.Error(t, err)
-
-	// Test setting remote
-	err = gitManager.SetRemote("git@github.com:michaelfromyeg/til.git")
-	assert.NoError(t, err)
-
-	// Create a test file
-	testFile := filepath.Join(tempDir, "test.txt")
-	err = os.WriteFile(testFile, []byte("Test content"), 0644)
-	assert.NoError(t, err)
-
-	// Test adding a file
-	err = gitManager.Add("test.txt")
-	assert.NoError(t, err)
-
-	// Test adding all files
-	err = gitManager.AddAll()
-	assert.NoError(t, err)
-
-	// Test committing changes
-	// err = gitManager.Commit("Test commit")
-	// fmt.Println("Commit error:", err)
-	// assert.NoError(t, err)
-
-	// Test push will fail (no remote)
-	// err = gitManager.Push()
-	// assert.Error(t, err)
-
-	// Test getting file URL
-	url := gitManager.GetFileURL("git@github.com:michaelfromyeg/til.git", filepath.Join(tempDir, "test.txt"))
-	assert.Equal(t, "https://github.com/michaelfromyeg/til/blob/main/test.txt", url)
+	status, err := second.Status()
+	require.NoError(t, err)
+	assert.Empty(t, status)
 }
 
-func TestCommand(t *testing.T) {
-	// Test running a command with stdout
-	cmd := NewCommand("echo", "Hello World")
-	stdout, err := cmd.RunStdOut()
-	assert.NoError(t, err)
-	assert.Contains(t, stdout, "Hello World")
+func TestGitInitFailureCleansMetadata(t *testing.T) {
+	requireGit(t)
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	manager := NewGitManager(worktree)
 
-	// Test running a command with stderr
-	cmd = NewCommand("bash", "-c", "echo Error >&2")
-	stderr, err := cmd.RunStdErr()
-	assert.NoError(t, err)
-	assert.Contains(t, stderr, "Error")
+	err := manager.Init(filepath.Join(t.TempDir(), "missing.git"))
+	require.Error(t, err)
+	assert.False(t, manager.IsInitialized())
+}
 
-	// Test running a command with both stdout and stderr
-	cmd = NewCommand("bash", "-c", "echo Output && echo Error >&2")
-	stdout, stderr, err = cmd.RunOutput()
-	assert.NoError(t, err)
-	assert.Contains(t, stdout, "Output")
-	assert.Contains(t, stderr, "Error")
+func TestGitFileURLs(t *testing.T) {
+	rawURL, err := GitHubRawFileURL(
+		"git@github.com:example/learning.git",
+		"feature/notes",
+		"files/abc_daily note.txt",
+	)
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		"https://raw.githubusercontent.com/example/learning/feature%2Fnotes/files/abc_daily%20note.txt",
+		rawURL,
+	)
 
-	// Test running a command that fails
-	cmd = NewCommand("false")
-	_, err = cmd.RunStdOut()
-	assert.Error(t, err)
+	_, err = GitHubRawFileURL("file:///tmp/repository.git", "main", "files/example.txt")
+	assert.ErrorContains(t, err, "does not have a web URL")
+
+	assert.Equal(
+		t,
+		"https://github.com/example/learning.git",
+		RedactGitRemoteURL("https://token@github.com/example/learning.git"),
+	)
+}
+
+func requireGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("Git is not installed")
+	}
+}
+
+func setGitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "TIL Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "til@example.test")
+	t.Setenv("GIT_COMMITTER_NAME", "TIL Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "til@example.test")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+}
+
+func newBareRepository(t *testing.T) string {
+	t.Helper()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	command := exec.Command("git", "init", "--bare", "--initial-branch=main", remote)
+	if output, err := command.CombinedOutput(); err != nil {
+		command = exec.Command("git", "init", "--bare", remote)
+		fallbackOutput, fallbackErr := command.CombinedOutput()
+		require.NoError(t, fallbackErr, "%s\n%s", output, fallbackOutput)
+		command = exec.Command("git", "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main")
+		require.NoError(t, command.Run())
+	}
+	return remote
+}
+
+func mustCurrentBranch(t *testing.T, manager *GitManager) string {
+	t.Helper()
+	branch, err := manager.CurrentBranch()
+	require.NoError(t, err)
+	return branch
+}
+
+func TestErrNoChangesIsStable(t *testing.T) {
+	assert.True(t, errors.Is(ErrNoChanges, ErrNoChanges))
 }

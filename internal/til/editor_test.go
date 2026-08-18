@@ -1,42 +1,52 @@
-// Create a new file: internal/til/editor_test.go
 package til
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSplitCommitMessage(t *testing.T) {
-	// Test with just a title
-	title, body := SplitCommitMessage("Single line message")
-	assert.Equal(t, "Single line message", title)
-	assert.Equal(t, "", body)
-
-	// Test with a title and a body
-	title, body = SplitCommitMessage("Title line\n\nBody paragraph 1\n\nBody paragraph 2")
-	assert.Equal(t, "Title line", title)
-	assert.Equal(t, "Body paragraph 1\n\nBody paragraph 2", body)
-
-	// Test with empty input
-	title, body = SplitCommitMessage("")
-	assert.Equal(t, "", title)
-	assert.Equal(t, "", body)
-
-	// Test with only whitespace
-	title, body = SplitCommitMessage("   \n   \n   ")
-	assert.Equal(t, "", title)
-	assert.Equal(t, "", body)
-
-	// Test with title followed by empty lines
-	title, body = SplitCommitMessage("Title\n\n\n\n")
+	title, body := SplitCommitMessage("Title\n\nFirst paragraph\n\nSecond paragraph")
 	assert.Equal(t, "Title", title)
-	assert.Equal(t, "", body)
+	assert.Equal(t, "First paragraph\n\nSecond paragraph", body)
+
+	title, body = SplitCommitMessage("Title\n\n\n")
+	assert.Equal(t, "Title", title)
+	assert.Empty(t, body)
+
+	title, body = SplitCommitMessage("   \n  ")
+	assert.Empty(t, title)
+	assert.Empty(t, body)
 }
 
-// We'll mock the OpenEditor function for testing purposes
-func TestGetDefaultEditor(t *testing.T) {
-	// This is a simple test that just ensures the function doesn't crash
-	editor := GetDefaultEditor()
-	assert.NotEmpty(t, editor)
+func TestGetDefaultEditorPrecedence(t *testing.T) {
+	t.Setenv("TIL_EDITOR", "til-editor")
+	t.Setenv("EDITOR", "editor")
+	t.Setenv("VISUAL", "visual")
+	assert.Equal(t, "til-editor", GetDefaultEditor())
+}
+
+func TestOpenEditorSupportsArguments(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-specific")
+	}
+
+	script := filepath.Join(t.TempDir(), "editor.sh")
+	content := `#!/bin/sh
+if [ "$1" != "--replace" ]; then
+    exit 2
+fi
+printf 'Edited title\n\nEdited body\n' > "$2"
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+	t.Setenv("TIL_EDITOR", script+" --replace")
+
+	edited, err := OpenEditor("original")
+	require.NoError(t, err)
+	assert.Equal(t, "Edited title\n\nEdited body\n", edited)
 }

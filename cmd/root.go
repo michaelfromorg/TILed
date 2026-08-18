@@ -2,35 +2,84 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"runtime/debug"
 
+	"github.com/michaelfromorg/tiled/internal/til"
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "til",
-	Short: "TIL - Track what you learned today",
-	Long: `TIL (Today I Learned) is a command-line application for tracking
-what you learned today. It provides a git-like interface
-for adding entries and syncing them with Notion.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		// If no subcommand is provided, print help
-		cmd.Help()
-	},
-}
+var Version string
 
 func Execute() error {
-	return rootCmd.Execute()
+	return NewRootCommand().Execute()
 }
 
-func init() {
-	rootCmd.AddCommand(versionCmd)
+func NewRootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "til",
+		Short:         "Track what you learn",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+
+	root.AddCommand(
+		newInitCommand(),
+		newAddCommand(),
+		newArchiveCommand(),
+		newCommitCommand(),
+		newCompletionCommand(),
+		newDatabaseCommand(),
+		newExportCommand(),
+		newStatusCommand(),
+		newPushCommand(),
+		newLogCommand(),
+		newSlogCommand(),
+		newRestoreCommand(),
+		newMigrateCommand(),
+		newVersionCommand(),
+	)
+	return root
 }
 
-var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print the version number of TIL",
-	Run: func(cmd *cobra.Command, args []string) {
-		// TODO(michaelfromyeg): implement true version here
-		fmt.Println("TIL v0.1.0")
-	},
+func newVersionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "til %s\n", currentVersion())
+		},
+	}
+}
+
+func currentVersion() string {
+	if Version != "" {
+		return Version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
+
+func loadManager() (til.Config, *til.Manager, error) {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return til.Config{}, nil, fmt.Errorf("get working directory: %w", err)
+	}
+
+	config, err := til.LoadConfig(workingDirectory)
+	if err != nil {
+		return config, nil, err
+	}
+	manager := til.NewManager(config)
+	if err := manager.EnsureInitialized(); err != nil {
+		return config, nil, err
+	}
+	return config, manager, nil
 }
