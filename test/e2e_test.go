@@ -155,7 +155,7 @@ func TestLocalCLIWorkflow(t *testing.T) {
 		t,
 		binary,
 		newDevice,
-		"y\nnew-device-token\nnew-device-database\nn\n",
+		"y\nn\nnew-device-token\nnew-device-database\nn\n",
 		"config",
 		"edit",
 	)
@@ -166,6 +166,7 @@ func TestLocalCLIWorkflow(t *testing.T) {
 	assert.True(t, restoredConfig.SyncToNotion)
 	assert.Equal(t, "new-device-token", restoredConfig.NotionAPIKey)
 	assert.Equal(t, "new-device-database", restoredConfig.NotionDBID)
+	assert.False(t, restoredConfig.NotionAPIKeyInKeyring)
 	assert.False(t, restoredConfig.SyncToGit)
 
 	output = requireCLI(t, binary, repository, "", "push")

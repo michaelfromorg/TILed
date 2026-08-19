@@ -15,6 +15,7 @@
 - Create checksummed portable archives and restore them on a new device
 - Generate completions for Bash, Zsh, Fish, and PowerShell
 - Inspect and update device-local synchronization settings without displaying secrets
+- Hide API-key input and optionally store the Notion token in the OS keychain
 - Sync the generated log and attachments to Git
 - Publish entries to a Notion database
 - Run commands from the repository root or any subdirectory
@@ -24,11 +25,18 @@
 
 - Go 1.22 or newer to build from source
 - Git when Git synchronization is enabled
+- A desktop keyring for optional secure token storage: macOS Keychain, Windows Credential Manager, or a Secret Service provider such as GNOME Keyring on Linux
 - Optional Notion integration with a database containing:
   - `TIL`, a title property
   - `Attachments`, a files property
 
 ## Installation
+
+Install with Homebrew:
+
+```bash
+brew install michaelfromorg/tiled/til
+```
 
 Download the archive for your operating system and architecture, plus `checksums.txt`, from the [latest GitHub release](https://github.com/michaelfromorg/TILed/releases/latest). Release archives are available for macOS, Linux, and Windows on both AMD64 and ARM64. Verify the archive against `checksums.txt` before extracting it.
 
@@ -74,7 +82,9 @@ til config
 til config edit
 ```
 
-`til config` redacts the Notion API key and any credentials embedded in a Git remote URL. `til config edit` is interactive; pressing Enter keeps an existing value. Disabling a synchronization destination removes its credentials from `.til/config`.
+`til config` redacts the Notion API key and any credentials embedded in a Git remote URL. `til config edit` is interactive; pressing Enter keeps an existing value. Disabling a synchronization destination removes its credentials from `.til/config` and deletes its Keychain entry when applicable.
+
+When input comes from a terminal, Notion API-key prompts disable echo while you type. New Notion configurations default to OS-keychain storage. You can answer no to keep the token in the owner-only `.til/config` file instead, which is useful on headless Linux systems without a Secret Service provider. To migrate an existing plaintext token, run `til config edit`, enable keychain storage, and press Enter at the API-key prompt to keep the current value.
 
 Create an entry without an attachment:
 
@@ -157,7 +167,7 @@ project/
     └── files/
 ```
 
-- `.til/config` contains local sync settings and is written with owner-only permissions on Unix systems. It can contain your Notion token and must not be committed.
+- `.til/config` contains local sync settings and is written with owner-only permissions on Unix systems. It contains only an opaque keychain account reference when secure token storage is enabled; otherwise it can contain your Notion token. It must not be committed.
 - `.til/backups` contains automatic migration backups, SQLite snapshots, and portable archives.
 - `.til/restore-backups` preserves the previous database, files, and README after a forced restore.
 - `.til/staging` contains attachment copies waiting for the next commit.
@@ -228,6 +238,8 @@ Git author configuration is still handled by Git. If your name or email is not c
 
 Notion pages use the `TIL` property for the entry title and page blocks for the optional body. Local `notion_synced` state prevents already-published entries from being sent again; `til push --notion --force` deliberately republishes them.
 
+If a configured keychain entry is missing or the platform keychain is unavailable, local commands continue to work. `til config` and `til status` report the credential as unavailable, while a Notion push returns an actionable error directing you to `til config edit`.
+
 Notion's files property requires public URLs rather than local file uploads with the API version used here. Therefore, entries with attachments require a configured GitHub remote. A normal `til push` sends Git changes first and then publishes GitHub raw-file URLs to Notion. If an attachment cannot be published safely, `til` reports an error instead of inserting a hard-coded or broken URL.
 
 ## Migrating legacy repositories
@@ -257,6 +269,14 @@ make dist VERSION=v1.1.0
 ```
 
 The archives are written to `dist/` with a `checksums.txt` SHA-256 manifest. A pushed semantic-version tag runs the complete check suite before GitHub publishes or updates its corresponding release.
+
+Generate the Homebrew formula from the checksums of an already-published release:
+
+```bash
+bash scripts/generate-homebrew-formula.sh v1.2.0 /path/to/homebrew-tiled/Formula/til.rb
+```
+
+Dependabot checks Go modules and GitHub Actions weekly and groups related updates into one pull request per ecosystem.
 
 ## License
 

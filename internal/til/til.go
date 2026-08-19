@@ -22,12 +22,15 @@ const (
 var ErrRepositoryNotInitialized = errors.New("TIL repository not initialized")
 
 type Config struct {
-	DataDir      string
-	NotionAPIKey string
-	NotionDBID   string
-	SyncToNotion bool
-	GitRemoteURL string
-	SyncToGit    bool
+	DataDir               string
+	NotionAPIKey          string
+	NotionDBID            string
+	NotionAPIKeyAccount   string
+	NotionAPIKeyInKeyring bool
+	NotionAPIKeyLoadError error
+	SyncToNotion          bool
+	GitRemoteURL          string
+	SyncToGit             bool
 }
 
 type Entry struct {

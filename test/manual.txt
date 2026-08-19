@@ -37,4 +37,8 @@ cd "$RESTORE_DIR"
 "$WORK_DIR/til" config edit
 
 # From the project checkout, build all release archives and checksums:
-# make dist VERSION=v1.1.0
+# make dist VERSION=v1.2.0
+#
+# API-key input is hidden when stdin is a terminal. New Notion configurations
+# default to OS-keychain storage; answer "n" at that prompt to test plaintext
+# compatibility instead.

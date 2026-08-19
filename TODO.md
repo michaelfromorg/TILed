@@ -19,3 +19,10 @@
 - [x] `til config` with redacted display and interactive editing
 - [x] Cross-platform release archives and SHA-256 checksums
 - [x] Refresh CI to current GitHub Action runtimes
+
+## v1.2 security and distribution
+
+- [x] Hidden Notion API-key input
+- [x] Optional OS-keychain credential storage
+- [x] Homebrew tap and formula generation
+- [x] Weekly grouped Dependabot updates

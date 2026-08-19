@@ -103,7 +103,13 @@ func newStatusCommand() *cobra.Command {
 					}
 				}
 				fmt.Fprintln(output, "\nNotion Sync:")
-				fmt.Fprintf(output, "API Key: %s\n", maskString(config.NotionAPIKey))
+				if config.NotionAPIKeyLoadError != nil {
+					fmt.Fprintln(output, "API Key: unavailable (run 'til config edit')")
+				} else if config.NotionAPIKeyInKeyring {
+					fmt.Fprintln(output, "API Key: configured (OS keychain)")
+				} else {
+					fmt.Fprintf(output, "API Key: %s\n", maskString(config.NotionAPIKey))
+				}
 				fmt.Fprintf(output, "DB ID:   %s\n", maskString(config.NotionDBID))
 				fmt.Fprintf(output, "Synced:  %d/%d entries\n", synced, len(allEntries))
 			}

@@ -31,11 +31,14 @@ func newInitCommand() *cobra.Command {
 			}
 
 			config, err := promptForConfig(
-				bufio.NewReader(cmd.InOrStdin()),
+				cmd.InOrStdin(),
 				cmd.OutOrStdout(),
 				til.Config{DataDir: workingDirectory},
 			)
 			if err != nil {
+				return err
+			}
+			if err := persistConfigTransition(nil, &config); err != nil {
 				return err
 			}
 
@@ -57,9 +60,6 @@ func newInitCommand() *cobra.Command {
 				}
 			}
 
-			if err := til.SaveConfig(config); err != nil {
-				return err
-			}
 			if config.SyncToGit {
 				if err := manager.RefreshReadme(); err != nil {
 					return err
@@ -69,19 +69,6 @@ func newInitCommand() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), "TIL repository initialized successfully")
 			return nil
 		},
-	}
-}
-
-func promptRequiredString(reader *bufio.Reader, output io.Writer, prompt string) (string, error) {
-	for {
-		value, err := promptString(reader, output, prompt)
-		if err != nil {
-			return "", err
-		}
-		if value != "" {
-			return value, nil
-		}
-		fmt.Fprintln(output, "A value is required.")
 	}
 }
 

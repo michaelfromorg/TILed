@@ -26,6 +26,7 @@ func LoadConfig(dir string) (Config, error) {
 	}
 	defer file.Close()
 
+	notionAPIKeySource := ""
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		key, value, ok := strings.Cut(scanner.Text(), "=")
@@ -40,6 +41,10 @@ func LoadConfig(dir string) (Config, error) {
 			config.NotionAPIKey = strings.TrimSpace(value)
 		case "NOTION_DB_ID":
 			config.NotionDBID = strings.TrimSpace(value)
+		case "NOTION_API_KEY_SOURCE":
+			notionAPIKeySource = strings.TrimSpace(value)
+		case "NOTION_API_KEY_ACCOUNT":
+			config.NotionAPIKeyAccount = strings.TrimSpace(value)
 		case "SYNC_TO_GIT":
 			config.SyncToGit = strings.TrimSpace(value) == "true"
 		case "GIT_REMOTE_URL":
@@ -50,14 +55,27 @@ func LoadConfig(dir string) (Config, error) {
 		return config, fmt.Errorf("read configuration: %w", err)
 	}
 
+	switch notionAPIKeySource {
+	case "", "config":
+	case "keyring":
+		config.NotionAPIKeyInKeyring = true
+		config.NotionAPIKey = ""
+		loadNotionAPIKey(&config)
+	default:
+		return config, fmt.Errorf(
+			"unsupported NOTION_API_KEY_SOURCE %q in configuration",
+			notionAPIKeySource,
+		)
+	}
 	return config, nil
 }
 
 func SaveConfig(config Config) error {
 	for name, value := range map[string]string{
-		"NOTION_API_KEY": config.NotionAPIKey,
-		"NOTION_DB_ID":   config.NotionDBID,
-		"GIT_REMOTE_URL": config.GitRemoteURL,
+		"NOTION_API_KEY":         config.NotionAPIKey,
+		"NOTION_API_KEY_ACCOUNT": config.NotionAPIKeyAccount,
+		"NOTION_DB_ID":           config.NotionDBID,
+		"GIT_REMOTE_URL":         config.GitRemoteURL,
 	} {
 		if strings.ContainsAny(value, "\r\n") {
 			return fmt.Errorf("%s cannot contain a newline", name)
@@ -67,7 +85,19 @@ func SaveConfig(config Config) error {
 	var content bytes.Buffer
 	fmt.Fprintf(&content, "SYNC_TO_NOTION=%t\n", config.SyncToNotion)
 	if config.SyncToNotion {
-		fmt.Fprintf(&content, "NOTION_API_KEY=%s\n", config.NotionAPIKey)
+		if config.NotionAPIKeyInKeyring {
+			if config.NotionAPIKeyAccount == "" {
+				return errors.New("Notion keychain account is required")
+			}
+			fmt.Fprintln(&content, "NOTION_API_KEY_SOURCE=keyring")
+			fmt.Fprintf(
+				&content,
+				"NOTION_API_KEY_ACCOUNT=%s\n",
+				config.NotionAPIKeyAccount,
+			)
+		} else {
+			fmt.Fprintf(&content, "NOTION_API_KEY=%s\n", config.NotionAPIKey)
+		}
 		fmt.Fprintf(&content, "NOTION_DB_ID=%s\n", config.NotionDBID)
 	}
 	fmt.Fprintf(&content, "SYNC_TO_GIT=%t\n", config.SyncToGit)

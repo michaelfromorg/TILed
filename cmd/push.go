@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/michaelfromorg/tiled/internal/til"
 	"github.com/spf13/cobra"
@@ -125,6 +126,16 @@ func pushNotion(
 	force bool,
 	cmd *cobra.Command,
 ) error {
+	if config.NotionAPIKeyLoadError != nil {
+		return fmt.Errorf(
+			"Notion API key is unavailable: %w; run 'til config edit'",
+			config.NotionAPIKeyLoadError,
+		)
+	}
+	if strings.TrimSpace(config.NotionAPIKey) == "" {
+		return errors.New("Notion API key is empty; run 'til config edit'")
+	}
+
 	entries, err := manager.GetLatestEntries(0)
 	if err != nil {
 		return err

@@ -4,11 +4,18 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/michaelfromorg/tiled/internal/til"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+)
+
+var (
+	isTerminal   = term.IsTerminal
+	readPassword = term.ReadPassword
 )
 
 func newConfigCommand() *cobra.Command {
@@ -42,21 +49,21 @@ func newConfigEditCommand() *cobra.Command {
 			}
 
 			updated, err := promptForConfig(
-				bufio.NewReader(cmd.InOrStdin()),
+				cmd.InOrStdin(),
 				cmd.OutOrStdout(),
 				config,
 			)
 			if err != nil {
 				return err
 			}
-			if err := til.SaveConfig(updated); err != nil {
+			if err := persistConfigTransition(&config, &updated); err != nil {
 				return err
 			}
 
 			if updated.SyncToGit {
 				gitManager := til.NewGitManager(filepath.Join(updated.DataDir, "til"))
 				if err := gitManager.Configure(updated.GitRemoteURL); err != nil {
-					if rollbackErr := til.SaveConfig(config); rollbackErr != nil {
+					if rollbackErr := persistConfigTransition(&updated, &config); rollbackErr != nil {
 						return fmt.Errorf(
 							"configure Git synchronization: %w; restore previous configuration: %v",
 							err,
@@ -79,10 +86,11 @@ func newConfigEditCommand() *cobra.Command {
 }
 
 func promptForConfig(
-	reader *bufio.Reader,
+	input io.Reader,
 	output io.Writer,
 	config til.Config,
 ) (til.Config, error) {
+	reader := bufio.NewReader(input)
 	updated := config
 	var err error
 
@@ -96,27 +104,47 @@ func promptForConfig(
 		return config, err
 	}
 	if updated.SyncToNotion {
+		updated.NotionAPIKeyInKeyring, err = promptYesNoDefault(
+			reader,
+			output,
+			"Store the Notion API key in your OS keychain?",
+			config.NotionAPIKeyInKeyring || !config.SyncToNotion,
+		)
+		if err != nil {
+			return config, err
+		}
+		if updated.NotionAPIKeyInKeyring != config.NotionAPIKeyInKeyring {
+			updated.NotionAPIKeyAccount = ""
+		}
 		updated.NotionAPIKey, err = promptConfigValue(
 			reader,
+			input,
 			output,
 			"Notion API key",
 			config.NotionAPIKey,
+			true,
 		)
 		if err != nil {
 			return config, err
 		}
 		updated.NotionDBID, err = promptConfigValue(
 			reader,
+			input,
 			output,
 			"Notion database ID",
 			config.NotionDBID,
+			false,
 		)
 		if err != nil {
 			return config, err
 		}
+		updated.NotionAPIKeyLoadError = nil
 	} else {
 		updated.NotionAPIKey = ""
 		updated.NotionDBID = ""
+		updated.NotionAPIKeyAccount = ""
+		updated.NotionAPIKeyInKeyring = false
+		updated.NotionAPIKeyLoadError = nil
 	}
 
 	updated.SyncToGit, err = promptYesNoDefault(
@@ -131,9 +159,11 @@ func promptForConfig(
 	if updated.SyncToGit {
 		updated.GitRemoteURL, err = promptConfigValue(
 			reader,
+			input,
 			output,
 			"Git remote URL",
 			config.GitRemoteURL,
+			false,
 		)
 		if err != nil {
 			return config, err
@@ -177,26 +207,115 @@ func promptYesNoDefault(
 
 func promptConfigValue(
 	reader *bufio.Reader,
+	input io.Reader,
 	output io.Writer,
 	label string,
 	currentValue string,
+	secret bool,
 ) (string, error) {
-	if currentValue == "" {
-		return promptRequiredString(reader, output, fmt.Sprintf("Enter your %s: ", label))
+	prompt := fmt.Sprintf("Enter your %s: ", label)
+	if currentValue != "" {
+		prompt = fmt.Sprintf(
+			"Enter your %s (leave blank to keep the current value): ",
+			label,
+		)
 	}
 
-	value, err := promptString(
-		reader,
-		output,
-		fmt.Sprintf("Enter your %s (leave blank to keep the current value): ", label),
-	)
-	if err != nil {
+	for {
+		var value string
+		var err error
+		if secret {
+			value, err = promptSecretString(reader, input, output, prompt)
+		} else {
+			value, err = promptString(reader, output, prompt)
+		}
+		if err != nil {
+			return "", err
+		}
+		if value != "" {
+			return value, nil
+		}
+		if currentValue != "" {
+			return currentValue, nil
+		}
+		fmt.Fprintln(output, "A value is required.")
+	}
+}
+
+func promptSecretString(
+	reader *bufio.Reader,
+	input io.Reader,
+	output io.Writer,
+	prompt string,
+) (string, error) {
+	file, isFile := input.(*os.File)
+	if !isFile || !isTerminal(int(file.Fd())) {
+		return promptString(reader, output, prompt)
+	}
+	if _, err := fmt.Fprint(output, prompt); err != nil {
 		return "", err
 	}
-	if value == "" {
-		return currentValue, nil
+	value, err := readPassword(int(file.Fd()))
+	if _, outputErr := fmt.Fprintln(output); outputErr != nil {
+		return "", outputErr
 	}
-	return value, nil
+	if err != nil {
+		return "", fmt.Errorf("read secret input: %w", err)
+	}
+	return strings.TrimSpace(string(value)), nil
+}
+
+func persistConfigTransition(previous *til.Config, updated *til.Config) error {
+	if updated.SyncToNotion && updated.NotionAPIKeyInKeyring {
+		if err := til.StoreNotionAPIKey(updated); err != nil {
+			return fmt.Errorf(
+				"%w; rerun configuration and decline OS keychain storage to use .til/config",
+				err,
+			)
+		}
+	} else {
+		updated.NotionAPIKeyAccount = ""
+		updated.NotionAPIKeyLoadError = nil
+	}
+
+	if err := til.SaveConfig(*updated); err != nil {
+		if rollbackErr := rollbackStoredNotionAPIKey(previous, updated); rollbackErr != nil {
+			return fmt.Errorf(
+				"save configuration: %w; roll back OS keychain: %v",
+				err,
+				rollbackErr,
+			)
+		}
+		return err
+	}
+
+	if previous != nil &&
+		previous.NotionAPIKeyInKeyring &&
+		previous.NotionAPIKeyAccount != "" &&
+		(!updated.NotionAPIKeyInKeyring ||
+			updated.NotionAPIKeyAccount != previous.NotionAPIKeyAccount) {
+		if err := til.DeleteNotionAPIKey(*previous); err != nil {
+			return fmt.Errorf(
+				"configuration saved, but the previous OS keychain entry could not be removed: %w",
+				err,
+			)
+		}
+	}
+	return nil
+}
+
+func rollbackStoredNotionAPIKey(previous *til.Config, updated *til.Config) error {
+	if !updated.NotionAPIKeyInKeyring || updated.NotionAPIKeyAccount == "" {
+		return nil
+	}
+	if previous != nil &&
+		previous.NotionAPIKeyInKeyring &&
+		previous.NotionAPIKeyAccount == updated.NotionAPIKeyAccount &&
+		previous.NotionAPIKey != "" {
+		restored := *previous
+		return til.StoreNotionAPIKey(&restored)
+	}
+	return til.DeleteNotionAPIKey(*updated)
 }
 
 func writeConfigSummary(output io.Writer, config til.Config) error {
@@ -209,7 +328,17 @@ func writeConfigSummary(output io.Writer, config til.Config) error {
 
 	if config.SyncToNotion {
 		fmt.Fprintln(&summary, "Notion sync: enabled")
-		fmt.Fprintln(&summary, "Notion API key: configured (redacted)")
+		switch {
+		case config.NotionAPIKeyLoadError != nil:
+			fmt.Fprintln(
+				&summary,
+				"Notion API key: unavailable (run 'til config edit')",
+			)
+		case config.NotionAPIKeyInKeyring:
+			fmt.Fprintln(&summary, "Notion API key: configured (OS keychain)")
+		default:
+			fmt.Fprintln(&summary, "Notion API key: configured in .til/config (redacted)")
+		}
 		fmt.Fprintf(&summary, "Notion database ID: %s\n", config.NotionDBID)
 	} else {
 		fmt.Fprintln(&summary, "Notion sync: disabled")
