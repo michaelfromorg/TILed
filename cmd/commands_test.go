@@ -53,6 +53,7 @@ func TestRootCommandContainsDocumentedCommands(t *testing.T) {
 		"archive",
 		"commit",
 		"completion",
+		"config",
 		"db",
 		"export",
 		"init",

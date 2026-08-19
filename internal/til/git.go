@@ -29,6 +29,50 @@ func (gm *GitManager) Init(remoteURL string) (retErr error) {
 	if gm.IsInitialized() {
 		return errors.New("git repository already initialized")
 	}
+	if err := gm.initialize(remoteURL); err != nil {
+		return err
+	}
+	gitDir := filepath.Join(gm.WorkDir, ".git")
+	defer func() {
+		if retErr != nil {
+			_ = os.RemoveAll(gitDir)
+		}
+	}()
+
+	if _, err := gm.run("fetch", "origin"); err != nil {
+		return fmt.Errorf("fetch Git remote: %w", err)
+	}
+
+	branch, found, err := gm.remoteBranch()
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+
+	if _, err := gm.run("checkout", "-B", branch, "origin/"+branch); err != nil {
+		return fmt.Errorf("check out remote branch %s: %w", branch, err)
+	}
+	if _, err := gm.run("branch", "--set-upstream-to", "origin/"+branch, branch); err != nil {
+		return fmt.Errorf("track remote branch %s: %w", branch, err)
+	}
+	return nil
+}
+
+// Configure initializes local Git metadata without fetching, or updates the
+// origin remote when the repository is already initialized.
+func (gm *GitManager) Configure(remoteURL string) error {
+	if gm.IsInitialized() {
+		return gm.SetRemote(remoteURL)
+	}
+	return gm.initialize(remoteURL)
+}
+
+func (gm *GitManager) initialize(remoteURL string) (retErr error) {
+	if gm.IsInitialized() {
+		return errors.New("git repository already initialized")
+	}
 	if strings.TrimSpace(remoteURL) == "" {
 		return errors.New("git remote URL cannot be empty")
 	}
@@ -53,24 +97,6 @@ func (gm *GitManager) Init(remoteURL string) (retErr error) {
 	}
 	if err := gm.SetRemote(remoteURL); err != nil {
 		return err
-	}
-	if _, err := gm.run("fetch", "origin"); err != nil {
-		return fmt.Errorf("fetch Git remote: %w", err)
-	}
-
-	branch, found, err := gm.remoteBranch()
-	if err != nil {
-		return err
-	}
-	if !found {
-		return nil
-	}
-
-	if _, err := gm.run("checkout", "-B", branch, "origin/"+branch); err != nil {
-		return fmt.Errorf("check out remote branch %s: %w", branch, err)
-	}
-	if _, err := gm.run("branch", "--set-upstream-to", "origin/"+branch, branch); err != nil {
-		return fmt.Errorf("track remote branch %s: %w", branch, err)
 	}
 	return nil
 }

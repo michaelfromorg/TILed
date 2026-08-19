@@ -85,7 +85,7 @@ func newPushCommand() *cobra.Command {
 func pushGit(manager *til.Manager, config til.Config, cmd *cobra.Command) (string, error) {
 	gitManager := til.NewGitManager(filepath.Join(config.DataDir, "til"))
 	if !gitManager.IsInitialized() {
-		return "", errors.New("Git repository is not initialized; run 'til init' again")
+		return "", errors.New("Git repository is not initialized; run 'til config edit' to configure it")
 	}
 	if err := manager.RefreshReadme(); err != nil {
 		return "", err

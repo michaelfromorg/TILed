@@ -148,6 +148,26 @@ func TestLocalCLIWorkflow(t *testing.T) {
 	restoredAttachment := restoredEntries[1].CommitID + "_daily note.txt"
 	assert.FileExists(t, filepath.Join(newDevice, "til", "files", restoredAttachment))
 
+	output = requireCLI(t, binary, newDevice, "", "config")
+	assert.Contains(t, output, "Notion sync: disabled")
+	assert.Contains(t, output, "Git sync: disabled")
+	output = requireCLI(
+		t,
+		binary,
+		newDevice,
+		"y\nnew-device-token\nnew-device-database\nn\n",
+		"config",
+		"edit",
+	)
+	assert.Contains(t, output, "Configuration updated successfully")
+	assert.NotContains(t, output, "new-device-token")
+	restoredConfig, err = til.LoadConfig(newDevice)
+	require.NoError(t, err)
+	assert.True(t, restoredConfig.SyncToNotion)
+	assert.Equal(t, "new-device-token", restoredConfig.NotionAPIKey)
+	assert.Equal(t, "new-device-database", restoredConfig.NotionDBID)
+	assert.False(t, restoredConfig.SyncToGit)
+
 	output = requireCLI(t, binary, repository, "", "push")
 	assert.Contains(t, output, "No sync destinations are configured.")
 

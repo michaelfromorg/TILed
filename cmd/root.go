@@ -33,6 +33,7 @@ func NewRootCommand() *cobra.Command {
 		newArchiveCommand(),
 		newCommitCommand(),
 		newCompletionCommand(),
+		newConfigCommand(),
 		newDatabaseCommand(),
 		newExportCommand(),
 		newStatusCommand(),

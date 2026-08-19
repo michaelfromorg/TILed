@@ -13,3 +13,9 @@
 - [x] `til export` with Markdown and JSON output
 - [x] SQLite backup and integrity commands
 - [x] Portable archive and new-device restore
+
+## v1.1 polish
+
+- [x] `til config` with redacted display and interactive editing
+- [x] Cross-platform release archives and SHA-256 checksums
+- [x] Refresh CI to current GitHub Action runtimes

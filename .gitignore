@@ -3,6 +3,7 @@
 tiled
 tilcli
 /til
+/dist/
 .env
 
 # within-repo testing

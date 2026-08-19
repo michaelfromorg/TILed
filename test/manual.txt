@@ -8,6 +8,7 @@ cd "$WORK_DIR"
 
 # Answer "n" to both sync prompts for a local-only smoke test.
 ./til init
+./til config
 
 printf 'example\n' > example.txt
 ./til add example.txt
@@ -32,3 +33,8 @@ RESTORE_DIR="$(mktemp -d)"
 cd "$RESTORE_DIR"
 "$WORK_DIR/til" restore "$WORK_DIR/portable.tar.gz"
 "$WORK_DIR/til" log --all
+"$WORK_DIR/til" config
+"$WORK_DIR/til" config edit
+
+# From the project checkout, build all release archives and checksums:
+# make dist VERSION=v1.1.0

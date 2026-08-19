@@ -2,7 +2,7 @@
 
 `e2e_test.go` builds the real `til` binary and exercises realistic workflows in temporary directories.
 
-- `TestLocalCLIWorkflow` covers piped initialization, add, multiple same-day commits, amend, log, status, nested-directory discovery, and no-op push behavior.
+- `TestLocalCLIWorkflow` covers piped initialization, add, multiple same-day commits, amend, log, status, configuration editing, export, database maintenance, portable archive/new-device restore, nested-directory discovery, and no-op push behavior.
 - `TestGitCLIWorkflow` uses a temporary local bare Git remote to cover initialization, explicit push semantics, generated README links, and attachment publication.
 
 Run both through the normal Go suite:

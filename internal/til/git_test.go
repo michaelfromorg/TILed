@@ -51,6 +51,26 @@ func TestGitInitFailureCleansMetadata(t *testing.T) {
 	assert.False(t, manager.IsInitialized())
 }
 
+func TestGitConfigureInitializesWithoutFetchingAndUpdatesRemote(t *testing.T) {
+	requireGit(t)
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	manager := NewGitManager(worktree)
+	firstRemote := filepath.Join(t.TempDir(), "not-created.git")
+
+	require.NoError(t, manager.Configure(firstRemote))
+	assert.True(t, manager.IsInitialized())
+	assert.Equal(t, "main", mustCurrentBranch(t, manager))
+	remote, err := manager.run("remote", "get-url", "origin")
+	require.NoError(t, err)
+	assert.Equal(t, firstRemote, remote)
+
+	secondRemote := filepath.Join(t.TempDir(), "replacement.git")
+	require.NoError(t, manager.Configure(secondRemote))
+	remote, err = manager.run("remote", "get-url", "origin")
+	require.NoError(t, err)
+	assert.Equal(t, secondRemote, remote)
+}
+
 func TestGitFileURLs(t *testing.T) {
 	rawURL, err := GitHubRawFileURL(
 		"git@github.com:example/learning.git",

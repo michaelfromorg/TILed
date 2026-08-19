@@ -30,44 +30,17 @@ func newInitCommand() *cobra.Command {
 				return errors.New("TIL repository already initialized")
 			}
 
-			reader := bufio.NewReader(cmd.InOrStdin())
-			syncToNotion, err := promptYesNo(reader, cmd.OutOrStdout(), "Do you want to sync to Notion? (y/n): ")
+			config, err := promptForConfig(
+				bufio.NewReader(cmd.InOrStdin()),
+				cmd.OutOrStdout(),
+				til.Config{DataDir: workingDirectory},
+			)
 			if err != nil {
 				return err
-			}
-			syncToGit, err := promptYesNo(reader, cmd.OutOrStdout(), "Do you want to sync to a Git repository? (y/n): ")
-			if err != nil {
-				return err
-			}
-
-			config := til.Config{
-				DataDir:      workingDirectory,
-				SyncToNotion: syncToNotion,
-				SyncToGit:    syncToGit,
-			}
-			if syncToNotion {
-				config.NotionAPIKey, err = promptRequiredString(reader, cmd.OutOrStdout(), "Enter your Notion API key: ")
-				if err != nil {
-					return err
-				}
-				config.NotionDBID, err = promptRequiredString(reader, cmd.OutOrStdout(), "Enter your Notion database ID: ")
-				if err != nil {
-					return err
-				}
-			}
-			if syncToGit {
-				config.GitRemoteURL, err = promptRequiredString(
-					reader,
-					cmd.OutOrStdout(),
-					"Enter your Git remote URL: ",
-				)
-				if err != nil {
-					return err
-				}
 			}
 
 			manager := til.NewManager(config)
-			if syncToGit {
+			if config.SyncToGit {
 				gitManager := til.NewGitManager(filepath.Join(workingDirectory, "til"))
 				if err := gitManager.Init(config.GitRemoteURL); err != nil {
 					return fmt.Errorf("initialize Git repository: %w", err)
@@ -87,7 +60,7 @@ func newInitCommand() *cobra.Command {
 			if err := til.SaveConfig(config); err != nil {
 				return err
 			}
-			if syncToGit {
+			if config.SyncToGit {
 				if err := manager.RefreshReadme(); err != nil {
 					return err
 				}

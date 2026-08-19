@@ -14,6 +14,7 @@
 - Create verified database backups and run integrity checks
 - Create checksummed portable archives and restore them on a new device
 - Generate completions for Bash, Zsh, Fish, and PowerShell
+- Inspect and update device-local synchronization settings without displaying secrets
 - Sync the generated log and attachments to Git
 - Publish entries to a Notion database
 - Run commands from the repository root or any subdirectory
@@ -28,6 +29,8 @@
   - `Attachments`, a files property
 
 ## Installation
+
+Download the archive for your operating system and architecture, plus `checksums.txt`, from the [latest GitHub release](https://github.com/michaelfromorg/TILed/releases/latest). Release archives are available for macOS, Linux, and Windows on both AMD64 and ARM64. Verify the archive against `checksums.txt` before extracting it.
 
 Install the `til` binary with Go:
 
@@ -63,6 +66,15 @@ til init
 ```
 
 `init` asks whether to configure Notion and Git. Both are optional, so you can use `til` entirely locally.
+
+Inspect the resulting device-local settings or update them later:
+
+```bash
+til config
+til config edit
+```
+
+`til config` redacts the Notion API key and any credentials embedded in a Git remote URL. `til config edit` is interactive; pressing Enter keeps an existing value. Disabling a synchronization destination removes its credentials from `.til/config`.
 
 Create an entry without an attachment:
 
@@ -192,9 +204,10 @@ til archive ~/my-til.tar.gz
 mkdir -p ~/my-til
 cd ~/my-til
 til restore /path/to/my-til.tar.gz
+til config edit
 ```
 
-Restore validates archive paths and checksums, verifies SQLite and foreign-key integrity, confirms that referenced bodies and attachments exist, installs the data, regenerates `til/README.md`, and creates a local-only `.til/config` when restoring into a fresh directory. Sync credentials remain device-specific and are never stored in the archive.
+Restore validates archive paths and checksums, verifies SQLite and foreign-key integrity, confirms that referenced bodies and attachments exist, installs the data, regenerates `til/README.md`, and creates a local-only `.til/config` when restoring into a fresh directory. Sync credentials remain device-specific and are never stored in the archive; use `til config edit` to reconnect the restored repository to Notion or Git.
 
 Restoring over existing data is rejected by default. `til restore --force <archive>` first moves the current `til.db`, `til/files`, and generated README under `.til/restore-backups`, then installs the validated archive. An existing nested `til/.git` directory is left in place.
 
@@ -236,6 +249,14 @@ make check
 ```
 
 This checks formatting, runs `go vet`, executes unit and offline end-to-end tests, runs the race detector, and builds the release binary. The Git end-to-end test uses a temporary local bare repository and does not require network access or credentials.
+
+Build the same macOS, Linux, and Windows archives published by tagged CI releases:
+
+```bash
+make dist VERSION=v1.1.0
+```
+
+The archives are written to `dist/` with a `checksums.txt` SHA-256 manifest. A pushed semantic-version tag runs the complete check suite before GitHub publishes or updates its corresponding release.
 
 ## License
 

@@ -1,4 +1,4 @@
-.PHONY: all build check clean deps fmt fmt-check help install lint run-add run-commit run-init run-log run-push test test-coverage test-race test-verbose vet
+.PHONY: all build check clean deps dist fmt fmt-check help install lint run-add run-commit run-init run-log run-push test test-coverage test-race test-verbose vet
 
 BINARY_NAME := til
 COVERAGE_FILE := coverage.out
@@ -13,6 +13,7 @@ help:
 	@echo "  make check          - Run formatting, vet, unit, integration, and race checks"
 	@echo "  make clean          - Remove build artifacts"
 	@echo "  make deps           - Download dependencies"
+	@echo "  make dist           - Build release archives and SHA-256 checksums"
 	@echo "  make fmt            - Format Go source files"
 	@echo "  make install        - Install til to GOPATH/bin"
 	@echo "  make test           - Run all tests"
@@ -26,8 +27,12 @@ deps:
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/til
 
+dist:
+	VERSION="$(VERSION)" DIST_DIR="dist" bash ./scripts/build-release.sh
+
 clean:
 	go clean
+	rm -rf dist
 	rm -f $(BINARY_NAME) $(COVERAGE_FILE)
 
 fmt:
